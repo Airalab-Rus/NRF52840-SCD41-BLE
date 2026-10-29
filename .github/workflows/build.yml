@@ -1,0 +1,40 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install PlatformIO
+        run: python -m pip install --upgrade platformio
+
+      - name: Build (env nicenano)
+        run: pio run
+
+      - name: Check firmware artifacts
+        run: |
+          test -f .pio/build/nicenano/firmware.elf
+          test -f .pio/build/nicenano/firmware.hex
+          echo "Firmware OK"
+
+      - name: Upload firmware (artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-nicenano
+          path: |
+            .pio/build/nicenano/firmware.elf
+            .pio/build/nicenano/firmware.hex
+            .pio/build/nicenano/firmware.bin
