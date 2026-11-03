@@ -72,7 +72,7 @@ static void clampRun(void) {
   if (_run.transitionSec > 30) _run.transitionSec = 30;
   _run.soundEnabled = _run.soundEnabled ? 1 : 0;
   if (_run.batCalPct < 50)  _run.batCalPct = 50;
-  if (_run.batCalPct > 200) _run.batCalPct = 200;
+  if (_run.batCalPct > 400) _run.batCalPct = 400; /* 10 МОм делитель сильно просаживается */
   if (_run.toffTenths < -50) _run.toffTenths = -50;
   if (_run.toffTenths > 50)  _run.toffTenths = 50;
 }
