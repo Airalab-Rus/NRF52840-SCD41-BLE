@@ -8,7 +8,7 @@
 using namespace Adafruit_LittleFS_Namespace;
 
 #define BIRDY_CFG_PATH "/birdy.cfg"
-#define BIRDY_CFG_VER  2 /* 2: калибровка CO2 убрана, добавлен toff */
+#define BIRDY_CFG_VER  3 /* 3: делитель 15к/15к -> batcal 100% */
 
 /* Защита SPC: калибровать «по текущему» можно только в чистом воздухе. */
 #ifndef BIRDY_SPC_MAX_PPM
@@ -113,6 +113,15 @@ static void loadCfg(void) {
     else if (!strcmp(ln, "ver"))    _run.cfgVer = (uint16_t)v;
   }
   clampRun();
+
+  /* Миграция: старый batcal (от прежнего делителя) больше не нужен. */
+  if (_run.cfgVer < 3) {
+    _run.batCalPct = 100;
+    _run.cfgVer = 3;
+    Serial.println("[ctl] миграция cfg: batcal -> 100%");
+    birdyCtlSave();
+  }
+
   Serial.printf("[ctl] cfg загружен: thr=%u hyst=%u alive=%d dead=%d sec=%u snd=%u\n",
                 _run.co2Bad, _run.hystPpm, (int)_run.angleAlive, (int)_run.angleDead,
                 _run.transitionSec, _run.soundEnabled);
