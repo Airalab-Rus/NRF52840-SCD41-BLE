@@ -54,7 +54,7 @@ static BirdyRuntime defaults(void) {
   r.chirpDown      = BIRDY_CHIRP_DOWN;
   r.chirpUpVar     = BIRDY_CHIRP_UP_VAR;
   r.chirpDownVar   = BIRDY_CHIRP_DOWN_VAR;
-  r.batCalPct      = 115; /* дев. 100 %; подобрано по мультиметру (3.45 В vs 3.0 В) */
+  r.batCalPct      = 100; /* 100 %: делитель 15к/15к читается без поправки */
   r.toffTenths     = 0;   /* смещение температуры: 0 = как с завода */
   r.cfgVer         = BIRDY_CFG_VER;
   return r;

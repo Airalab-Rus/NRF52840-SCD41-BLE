@@ -48,15 +48,15 @@
 #ifndef BIRDY_CHIRP_DOWN_VAR
 #define BIRDY_CHIRP_DOWN_VAR 0U
 #endif
-/* ---- АКБ: делитель на P0.31 (AIN7), два резистора по 10 МОм (SMD 1005) ---- */
+/* ---- АКБ: делитель на P0.31 (AIN7), два резистора по 15 кОм (SMD 153) ---- */
 #ifndef BIRDY_VBAT_PIN
 #define BIRDY_VBAT_PIN 31
 #endif
 #ifndef BIRDY_VBAT_R_TOP
-#define BIRDY_VBAT_R_TOP 10000000UL /* верхний, к плюсу АКБ (1005 = 10 МОм) */
+#define BIRDY_VBAT_R_TOP 15000UL /* верхний, к плюсу АКБ (153 = 15 кОм) */
 #endif
 #ifndef BIRDY_VBAT_R_BOT
-#define BIRDY_VBAT_R_BOT 10000000UL /* нижний, к GND (1005 = 10 МОм) */
+#define BIRDY_VBAT_R_BOT 15000UL /* нижний, к GND (153 = 15 кОм) */
 #endif
 /* Порог «глубокого разряда» (мВ) — ниже него в BTHome уходит battery_low. */
 #ifndef BIRDY_VBAT_LOW_MV

@@ -42,7 +42,7 @@
 | SCD41 SCL | 20 | P0.20 | I²C |
 | Серво (сигнал) | 24 | P0.24 | 50 Гц, 1000–3000 мкс |
 | Пьезо (сигнал) | 22 | P0.22 | PWM 2.4–4 кГц |
-| Батарея (делитель) | 31 | P0.31 / AIN7 | R_top = R_bot = 10 МОм (SMD 1005) |
+| Батарея (делитель) | 31 | P0.31 / AIN7 | R_top = R_bot = 15 кОм (SMD 153) |
 
 Плата: **nRF52840 SuperMini / Nice!Nano** (UF2-бутлоадер + SoftDevice S140 v6), приложение грузится с `0x26000`.
 
@@ -144,7 +144,7 @@ thr=1200 hyst=100 alive=0 dead=100 sec=8 snd=1 toff=0
 | `BIRDY_ANGLE_ALIVE` / `ANGLE_DEAD` | 0 / 100 | углы, % |
 | `BIRDY_TRANSITION_SEC` | 3 | время хода, с |
 | `BIRDY_SELFTEST` / `BIRDY_SELFTEST_MS` | 1 / 8000 | плавный тест серво при загрузке |
-| `BIRDY_VBAT_PIN` / `R_TOP` / `R_BOT` / `CAL_PCT` | 31 / 10000000 / 10000000 / 115 | делитель АКБ (2 × 10 МОм) |
+| `BIRDY_VBAT_PIN` / `R_TOP` / `R_BOT` / `CAL_PCT` | 31 / 15000 / 15000 / 100 | делитель АКБ (2 × 15 кОм) |
 | `BTHOME_PRPH_CONN` | 2 | число одновременных подключений |
 
 ## Структура проекта
