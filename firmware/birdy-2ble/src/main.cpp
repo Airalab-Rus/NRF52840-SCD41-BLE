@@ -283,41 +283,56 @@ static bool sensorReinit(void) {
  * ФИКС зависаний: шину I2C между циклами НЕ выключаем (Wire.end не вызываем),
  * таймаут сокращён до 45 с, внутри ожидания «тикают» серво и пьезо — иначе
  * трель зависает на одной ноте. При сбое — восстановление шины + re-init. */
+/* Периодическое измерение держим ЗАПУЩЕННЫМ постоянно: только в этом режиме
+ * работает автокалибровка SCD41 (ASC). Раньше start/stop на каждом цикле
+ * сбрасывал её таймер, и базовый уровень CO2 мог уплывать. */
+static bool g_sensorRunning = false;
+
+static void sensorStart(void) {
+	if (g_sensorRunning) return;
+	Wire.begin();
+	if (!mySensor.startLowPowerPeriodicMeasurement()) {
+		mySensor.stopPeriodicMeasurement(500);
+		sensorReinit();
+		if (!mySensor.startLowPowerPeriodicMeasurement()) {
+			Serial.println("[scd] start: FAIL");
+			return;
+		}
+	}
+	g_sensorRunning = true;
+	Serial.println("[scd] периодическое измерение запущено (ASC активна)");
+	delay(4000); /* первый цикл low-power — 30 с, даём старт */
+}
+
+static void sensorStop(void) {
+	if (!g_sensorRunning) return;
+	mySensor.stopPeriodicMeasurement(500);
+	g_sensorRunning = false;
+}
+
 bool doMeasure() {
 	bool got = false;
 	static uint8_t failStreak = 0;
 	Wire.begin();
 
-	/* Смещение температуры применяем, только когда оно изменилось
-	 * (команду принимает только простаивающий датчик). */
+	/* Смещение температуры датчик принимает только в idle-режиме,
+	 * поэтому при изменении — останавливаем, пишем, запускаем снова. */
 	{
 		static int16_t appliedToff = 32767;
 		const int16_t want = birdyRun().toffTenths;
 		if (want != appliedToff) {
+			sensorStop();
 			mySensor.setTemperatureOffset((float)want / 10.0f);
 			appliedToff = want;
 			Serial.printf("[scd] смещение температуры = %.1f C\n", want / 10.0f);
 		}
 	}
 
-	bool started = mySensor.startLowPowerPeriodicMeasurement();
-	if (!started) {
-		/* датчик мог остаться в periodic-режиме после сбоя — сбрасываем */
-		mySensor.stopPeriodicMeasurement(500);
-		started = mySensor.startLowPowerPeriodicMeasurement();
-	}
-	if (!started) {
-		sensorReinit();
-		started = mySensor.startLowPowerPeriodicMeasurement();
-	}
-	Serial.printf("[meas] startLowPower: %s\n", started ? "OK" : "FAIL(stuck/bus)");
-
-	if (!started) {
+	sensorStart();
+	if (!g_sensorRunning) {
 		if (++failStreak >= 3) { failStreak = 0; sensorReinit(); }
 		return false;
 	}
-
-	delay(4000); /* датчику нужно начать первый цикл (low-power: 30 с) */
 
 	uint32_t t0 = millis();
 	bool readOK = false;
@@ -341,8 +356,11 @@ bool doMeasure() {
 		float h = mySensor.getHumidity();
 		Serial.printf("[meas] RAW sensor: co2=%u ppm temp=%.2fC rh=%.2f%%\n", c, t, h);
 
-		if (c >= 100 && c <= 5000 && t >= -40.0f && t <= 60.0f && h >= 0.0f && h <= 100.0f) {
-			co2 = constrain(c, 400, 2000);
+		/* Без зажима снизу: раньше `constrain(c, 400, 2000)` превращал любые
+		 * значения ниже 400 в ровно 400 ppm — невозможно было отличить сбой
+		 * датчика от реальных ~380 ppm. */
+		if (c >= 0 && c <= 5000 && t >= -40.0f && t <= 60.0f && h >= 0.0f && h <= 100.0f) {
+			co2 = c;
 			temp = t;
 			hum = h;
 			got = true;
@@ -351,14 +369,15 @@ bool doMeasure() {
 		}
 	}
 
-	mySensor.stopPeriodicMeasurement(0);
-	/* Wire.end() НЕ вызываем — это и ломало шину */
+	/* Датчик НЕ останавливаем — пусть работает непрерывно (ASC).
+	 * Wire.end() тоже НЕ вызываем — это и ломало шину. */
 
 	/* Эскалация лечения, если замеры не проходят (без выдёргивания питания). */
 	if (got) {
 		failStreak = 0;
 	} else {
 		failStreak++;
+		sensorStop();
 		if (failStreak == 3) {
 			sensorReinit(); /* переинициализация шины и датчика */
 		} else if (failStreak == 5) {
