@@ -7,8 +7,12 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
+  firmware:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [firmware/base, firmware/birdy-2ble]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -21,20 +25,26 @@ jobs:
       - name: Install PlatformIO
         run: python -m pip install --upgrade platformio
 
-      - name: Build (env nicenano)
-        run: pio run
+      - name: Build ${{ matrix.project }}
+        run: pio run -d ${{ matrix.project }}
 
       - name: Check firmware artifacts
         run: |
-          test -f .pio/build/nicenano/firmware.elf
-          test -f .pio/build/nicenano/firmware.hex
+          test -f ${{ matrix.project }}/.pio/build/nicenano/firmware.elf
+          test -f ${{ matrix.project }}/.pio/build/nicenano/firmware.hex
           echo "Firmware OK"
+
+      - name: Make UF2
+        run: |
+          python scripts/elf2uf2.py \
+            ${{ matrix.project }}/.pio/build/nicenano/firmware.elf \
+            firmware.uf2
 
       - name: Upload firmware (artifact)
         uses: actions/upload-artifact@v4
         with:
-          name: firmware-nicenano
+          name: firmware-${{ strategy.job-index }}
           path: |
-            .pio/build/nicenano/firmware.elf
-            .pio/build/nicenano/firmware.hex
-            .pio/build/nicenano/firmware.bin
+            firmware.uf2
+            ${{ matrix.project }}/.pio/build/nicenano/firmware.elf
+            ${{ matrix.project }}/.pio/build/nicenano/firmware.hex

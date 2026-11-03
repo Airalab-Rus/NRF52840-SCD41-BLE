@@ -1,9 +1,9 @@
-# NRF52840-SCD41-BLE — CO₂ AirNode для Home Assistant
+# CO2-Birdy — узел мониторинга воздуха на nRF52840 + SCD41
 
-Пассивный BLE-датчик качества воздуха (CO₂ ppm, температура, влажность) на
-**nRF52840 SuperMini (Nice!Nano) + SCD41 (Sensirion)**. Работает от литиевой
-батареи, каждые 60 секунд шлёт замер через **BTHome v2** — Home Assistant
-видит устройство сам, без хаба, без MQTT, без облака.
+Автономный датчик CO₂/температуры/влажности на **nRF52840 SuperMini (Nice!Nano) + SCD41 (Sensirion)**
+с передачей в Home Assistant по BLE (**BTHome v2**) — и «птичка» на серво + пьезо, которая оживает
+в чистом воздухе и «умирает» с нисходящей трелью, когда CO₂ превышает порог.
+Настройка — с Android-приложения по BLE.
 
 ![demo](docs/demo.gif)
 
@@ -11,183 +11,184 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Platform: PlatformIO](https://img.shields.io/badge/PlatformIO-nordicnrf52-blue.svg)](https://platformio.org/)
 
----
+## Что в репозитории
 
-## Features
+| Часть | Папка | Что это |
+|---|---|---|
+| **Базовая прошивка** | [`firmware/base`](firmware/base) | CO₂-узел: SCD41 → BTHome v2 по BLE. Минимум кода, проверенный стек. |
+| **Birdy 2BLE** | [`firmware/birdy-2ble`](firmware/birdy-2ble) | То же + серво, пьезо (трели), батарея на ADC, GATT-сервис управления, 2 одновременных BLE-подключения, настройки в NVS. |
+| **Android-приложение** | [`android/birdy-app`](android/birdy-app) | Пульт: автосканирование, ползунки порога/углов/температуры, живой предпросмотр, батарея, тесты. |
+| **Документация** | [`docs/`](docs) | Установка, распиновка, прошивка, HA, архитектура, энергобюджет, troubleshooting. |
+| **Утилиты** | [`scripts/elf2uf2.py`](scripts/elf2uf2.py) | `.elf` → UF2 для UF2-бутлоадера Nice!Nano. |
 
-- **SCD41** (NDIR CO₂ + T/RH) по I²C: low-power periodic mode, 1 замер ≈ 1.5 с внутри датчика
-- **BTHome v2** — стандартные сенсоры HA: температура (0.01 °C), влажность (0.01 %), CO₂ (ppm), батарея %
-- **Без хаба и MQTT**: пассивная BLE-реклама, HA ловит устройство сам (Settings → Bluetooth)
-- **Питание от LiPo 3.7 В** (2500 мА·ч): расчёт автономности ≈ **6–8 месяцев** при цикле 60 с — [docs/ENERGY.md](docs/ENERGY.md)
-- Датчик между замерами в low-power, I²C отключается (`Wire.end()`), BLE включается только в 0.5 с окна отчёта
-- **Простая прошивка**: UF2 (двойной RESET → копирование файла), без J-Link
-- CI-сборка (GitHub Actions) + чистая офлайн-сборка через PlatformIO
-- Код на C++ (Arduino-ядро), комментарии на русском, вся логика в одном `main.cpp`
+## Возможности
 
-## Установка (Installation)
+- **SCD41** (Sensirion): CO₂, температура, влажность; фотоакустический сенсор, заводская калибровка + AFC.
+- **BTHome v2** — нативная интеграция Home Assistant по BLE, без шлюзов, MQTT и облака.
+- **Автономность**: замер раз в минуту, реклама окнами по 30 с; питание от Li-Ion, контроль через делитель на ADC.
+- **«Птичка»**: два положения серво (жива/мёртва), плавный `easeInOut`-ход, 6 семейств трелей
+  (канарейка, чиж, зарянка, крапивник, жаворонок, соловей) с нарастанием и угасанием.
+- **Управление по BLE**: порог CO₂, гистерезис, углы, время хода, звук, смещение температуры, тесты —
+  всё сохраняется в NVS и переживает перезагрузку.
+- **Два одновременных подключения** (телефон + планшет) при сохранении BTHome-рекламы.
+- **Отказоустойчивость I²C**: восстановление шины (9 тактов SCL + STOP), re-init датчика,
+  эскалация до заводского сброса при повторных сбоях.
 
-**ОС:** Windows 10/11, Linux, macOS (всё, что поддерживает PlatformIO).
-**Язык:** Python **3.9–3.12** (обязательно, нужен для PlatformIO Core).
+## Железо
+
+| Что | Пин (Arduino) | Порт | Примечание |
+|---|---|---|---|
+| SCD41 SDA | 17 | P0.17 | I²C |
+| SCD41 SCL | 20 | P0.20 | I²C |
+| Серво (сигнал) | 24 | P0.24 | 50 Гц, 1000–3000 мкс |
+| Пьезо (сигнал) | 22 | P0.22 | PWM 2.4–4 кГц |
+| Батарея (делитель) | 31 | P0.31 / AIN7 | R_top 1 МОм, R_bot 1.5 МОм |
+
+Плата: **nRF52840 SuperMini / Nice!Nano** (UF2-бутлоадер + SoftDevice S140 v6), приложение грузится с `0x26000`.
+
+Подробная распиновка и схема — [docs/WIRING.md](docs/WIRING.md).
+
+## Быстрый старт (прошивка UF2)
+
+1. Соберите прошивку (см. ниже) и получите `.uf2` через [`scripts/elf2uf2.py`](scripts/elf2uf2.py).
+2. **Двойной RESET** платы → появляется диск `NICENANO`.
+3. Скопируйте `.uf2` на диск — плата перезагрузится в приложение.
+4. В Home Assistant устройство появится само (интеграция **BTHome**).
+
+Подробно: [docs/FLASHING.md](docs/FLASHING.md).
+
+## Сборка из исходников
+
+Нужны Python 3.9+ и PlatformIO Core. nRF Connect SDK не требуется — используется PlatformIO + Adafruit nRF52 core.
 
 ```bash
-# 1. Python из официального python.org (поставить «Add to PATH»)
-python --version            # ожидаем 3.9+
+# базовая прошивка (только BTHome)
+pio run -d firmware/base
 
-# 2. PlatformIO Core
-python -m pip install --upgrade platformio
+# birdy-2ble (серво, пьезо, батарея, BLE-управление)
+pio run -d firmware/birdy-2ble
 
-# 3. Клонировать проект
-git clone https://github.com/Airalab-Rus/NRF52840-SCD41-BLE.git
-cd NRF52840-SCD41-BLE
-
-# 4. Сборка (при первом запуске PlatformIO сам скачает платформу nordicnrf52
-#    и библиотеку SparkFun SCD4x — нужен интернет)
-pio run
+# готовый UF2 для бутлоадера
+python scripts/elf2uf2.py firmware/birdy-2ble/.pio/build/nicenano/firmware.elf CO2-Birdy.uf2
 ```
 
-Успех: `SUCCESS`, Flash ≈ 135 KB (16.6 %), RAM ≈ 6.3 %.
-Подробности и офлайн-режим — [docs/INSTALL.md](docs/INSTALL.md).
+Стек: `platform = nordicnrf52`, `framework = arduino` (Adafruit nRF52 core),
+`sparkfun/SparkFun SCD4x Arduino Library@^1.1.2`.
 
-## Quick start (за 5 минут)
+> Прошивать `.elf`/`.hex` в UF2-бутлоадер нельзя — нужен именно UF2 (конвертер в `scripts/`).
 
-1. **Распаять датчик** (4 провода): SDA→**P0.17**, SCL→**P0.20**, VCC→**3V3**, GND→**GND** — [docs/WIRING.md](docs/WIRING.md)
-2. `pio run` → собрать `.pio/build/nicenano/firmware.elf`
-3. `python scripts/elf2uf2.py .pio/build/nicenano/firmware.elf CO2-AirNode.uf2` → UF2-файл
-4. **Двойной RESET** на плате → появится диск `NICENANO` (E:) → копировать `CO2-AirNode.uf2` туда
-5. Плата перезагрузится в приложение. В Home Assistant: **Настройки → Устройства и службы → + → Bluetooth** — устройство `CO2-AirNode` найдено, сенсоры появляются в течение минуты
-6. Готово. Каждый цикл (60 с) — новый пакет с реальными CO₂/T/RH
+## Android-приложение
 
-Пошаговая прошивка — [docs/FLASHING.md](docs/FLASHING.md), настройка HA — [docs/HOMEASSISTANT.md](docs/HOMEASSISTANT.md).
+Папка [`android/birdy-app`](android/birdy-app) — Kotlin + Jetpack Compose.
 
-## Usage
+- **Автопоиск**: скан стартует сам, `CO2-Birdy` показывается отдельной карточкой с приоритетом.
+- **Визуализация**: стрелочный индикатор положения серво (метки «жива»/«мёртва»), полоса CO₂ с порогом,
+  индикатор АКБ (В и %) по кривой Li-Ion.
+- **Настройка**: порог CO₂, гистерезис, угол ЖИВА/МЁРТВА (живой предпросмотр через `goto=`),
+  время хода, звук, смещение температуры датчика.
+- **Тесты**: замер, свип серво, трели вверх/вниз, сброс настроек.
 
-Сценарии «из коробки»:
+Сборка: Android Studio (File → Open) или `gradle assembleDebug` (JDK 17, Android SDK 34).
 
-- **Дашборд HA**: карточки `temperature`, `humidity`, `carbon_dioxide`, `battery` обновляются сами (пакет приходит каждые 60 с, HA обновляет значения при приёме пакета).
-- **Удаление устройства**: HA → Настройки → Устройства → `CO2-AirNode` → удалить (или отключить Bluetooth-адаптер на 10 с).
-- **Смена имени/периода замера**: отредактировать `#define` в `src/main.cpp`, пересобрать, переписать — см. [Configuration](#configuration).
-- **Отладка по USB-серии**: `pio device monitor` (115200) — в логе видно каждый цикл:
-  ```
-  === CO2-AirNode boot ===
-  [boot] SCD41 begin: OK
-  [boot] first measure: OK co2=412 temp=23.4C rh=41.3%
-  [meas] RAW sensor: co2=412 ppm temp=23.41C rh=41.28%
-  ```
+> Приложение собиралось в пути с кириллицей — в `gradle.properties` стоит
+> `android.overridePathCheck=true`; надёжнее собирать из ASCII-пути.
 
-## Configuration
+## Home Assistant
 
-Все настройки — `#define` в начале [`src/main.cpp`](src/main.cpp) (это «конфигурационный файл» проекта; `.env`/env-переменные для прошивки не используются):
+Устройство видно в интеграции **BTHome** (Bluetooth, пассивное сканирование):
 
-| Настройка | Файл | По умолчанию | Описание |
-|---|---|---|---|
-| `MY_SDA_PIN` | `src/main.cpp` | `17` | I²C-SDA SCD41 (P0.17) |
-| `MY_SCL_PIN` | `src/main.cpp` | `20` | I²C-SCL SCD41 (P0.20) |
-| `DEVICE_NAME` | `src/main.cpp` | `"CO2-AirNode"` | имя устройства в BLE/HA |
-| `SCD4x_ALTITUDE` | `src/main.cpp` | `160` | высота над у.м., м (коррекция CO₂) |
-| `SCD4x_TEMP_OFFSET` | `src/main.cpp` | `0` | сдвиг температуры, °C |
-| `MEASUREMENT_PERIOD` | `src/main.cpp` | `60` | период цикла замер+отчёт, **сек** (300 → автономность ×4) |
-| `lib_deps` | `platformio.ini` | SparkFun SCD4x `^1.1.2` | версия драйвера датчика |
-| `board` | `platformio.ini` | `nicenano` | nRF52840 SuperMini / Nice!Nano |
-
-## Project structure
-
-```
-.
-├── platformio.ini          # env: nicenano (nordicnrf52 + Arduino + SCD4x)
-├── src/
-│   ├── main.cpp            # вся логика: boot, замер, BTHome-отчёт (156 строк)
-│   ├── BTHome.cpp/.h       # BTHome v2 over BLE (портировка Chreece, без изменений)
-├── variants/nicenano/      # Arduino-вариант платы (пины nRF52840 SuperMini)
-├── scripts/
-│   └── elf2uf2.py          # ELF → UF2 (прошивка через USB-mass-storage)
-├── docs/                   # INSTALL / WIRING / FLASHING / HOMEASSISTANT /
-│   │                       # ARCHITECTURE / ENERGY / TROUBLESHOOTING
-├── .github/workflows/build.yml   # CI: pio run
-├── CHANGELOG.md / CONTRIBUTING.md / CODE_OF_CONDUCT.md
-└── LICENSE                 # MIT
-```
-
-## API reference
-
-### Класс `BTHome` (`src/BTHome.h`)
-
-| Метод | Назначение |
+| Сущность | Единица |
 |---|---|
-| `begin(name, encryption, key, trigger)` | инициализация BLE + устройства (у нас: без шифрования) |
-| `resetMeasurement()` | очистить буфер пакетов перед новым отчётом |
-| `addMeasurement(id, value)` | добавить метрику (`ID_TEMPERATURE_PRECISE`, `ID_HUMIDITY_PRECISE`, `ID_CO2`, `ID_BATTERY`, …) |
-| `addMeasurement_state(id, state)` | бинарное состояние (`STATE_BATTERY_LOW`, …) |
-| `sendPacket(delay_ms)` | собрать пакет, включить advertise на `delay_ms`, отключить |
-| `start()/stop()/isAdvertising()` | ручное управление рекламой |
-| `buildPacket()` | сборка 31-байтового ADV-пакета (безопасно вызвать вручную) |
+| Carbon dioxide | ppm |
+| Temperature | °C |
+| Humidity | % |
+| Voltage | В |
+| Battery | % |
+| Battery low | флаг (< 3.3 В) |
 
-Используемые BTHome-идентификаторы: `ID_PACKET=0x00`, `ID_TEMPERATURE_PRECISE=0x02`,
-`ID_HUMIDITY_PRECISE=0x03`, `ID_CO2=0x12`, `ID_BATTERY=0x01`, `STATE_BATTERY_LOW=0x15`.
+Автоматизации и тонкости — [docs/HOMEASSISTANT.md](docs/HOMEASSISTANT.md).
 
-### Цикл работы (main loop)
+## Настройка по BLE (birdy-2ble)
+
+Сервис **0xFFF0**. Текстовые команды пишутся в `0xFFF4` (или в `0xFFF1` — прошивка сама отличает
+текст от бинарных команд), ответ — в `0xFFF5`:
 
 ```
-boot → BLE.begin → I2C begin (P0.17/P0.20) → SCD41.begin
-     → startLowPowerPeriodicMeasurement
-     → до готовности readMeasurement (≤120 с) → чтение глобалов библиотеки
-     → stopPeriodicMeasurement + Wire.end()
-     → sendReport() (BTHome-пакет, 0.5 с advertise)
-     → сон (delay) до следующего цикла (MEASUREMENT_PERIOD)
+thr=1200 hyst=100 alive=0 dead=100 sec=8 snd=1 toff=0
 ```
 
-⚠️ После успешного `readMeasurement()` **не делать второй** — в low-power-режиме
-буфер датчика пуст между обновлениями, повторный вызов вернёт `false` и реальные
-значения потеряются (это был главный баг v0.1, исправлен в v0.2). Подробности —
-[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-
-## Testing
-
-- **CI**: каждый push собирает проект (`pio run`) — GitHub Actions, `.github/workflows/build.yml`.
-- **Юнит-тестов нет** (железная прошивка). Покрытие: сборка + ручной стенд:
-  1. `pio run` — компиляция/линковка без ошибок
-  2. Прошивка UF2, `pio device monitor` — в логе `SCD41 begin: OK` и `RAW sensor: co2=…` с реальными числами
-  3. HA: значения CO₂/T/RH меняются от дыхания/тепловых пушек (а не статичные 400/0/0)
-- Чек-лист приёмки — [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
-
-## Build & deploy
-
-| Шаг | Команда |
+| Ключ | Значение |
 |---|---|
-| Сборка | `pio run` |
-| UF2 из ELF | `python scripts/elf2uf2.py .pio/build/nicenano/firmware.elf CO2-AirNode.uf2` |
-| Прошивка | двойной RESET → копировать `CO2-AirNode.uf2` в диск `NICENANO` |
-| Мониторинг | `pio device monitor --baud 115200` |
-| CI | push → GitHub Actions (автоматическая `pio run`) |
+| `thr=` | порог CO₂ «смерти», ppm (300…3000) |
+| `hyst=` | гистерезис оживления, ppm (0…500) |
+| `alive=` / `dead=` | углы серво, −100…100 % |
+| `sec=` | время хода серво, с (0…30) |
+| `snd=` | звук 0/1 |
+| `toff=` | смещение температуры, 0.1 °C (−50…50) |
+| `goto=` | сразу поставить серво в положение (подбор углов) |
+| `meas` / `sweep` / `up` / `down` / `reset` / `get` / `bat` | тесты и чтение |
 
-Менять код → пересобирать → переписывать UF2. OTA-DFU в этой версии **нет**
-(см. [Known limitations](docs/TROUBLESHOOTING.md#known-limitations)).
+Полный протокол (бинарные `FFF1/FFF2/FFF3`, формат `info`):
+[firmware/birdy-2ble/docs/CONTROL-2BLE.md](firmware/birdy-2ble/docs/CONTROL-2BLE.md).
 
-## Troubleshooting
+Калибровка CO₂ **намеренно не реализована** — датчик калиброван на заводе, автокалибровка (AFC) работает сама.
+Настраивается только смещение температуры.
 
-Коротко (полная таблица — [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)):
+## Настройки сборки (build_flags)
 
-| Симптом | Решение |
+| Флаг | По умолчанию | Что задаёт |
+|---|---|---|
+| `BIRDY_SERVO_PIN` / `BIRDY_PIEZO_PIN` | 24 / 22 | пины серво и пьезо |
+| `BIRDY_CO2_BAD` | 600 | порог CO₂, ppm |
+| `BIRDY_STATUS_DEAD_TICKS` / `REVIVE_TICKS` | 1 / 1 | подтверждения перехода |
+| `BIRDY_ANGLE_ALIVE` / `ANGLE_DEAD` | 0 / 100 | углы, % |
+| `BIRDY_TRANSITION_SEC` | 3 | время хода, с |
+| `BIRDY_SELFTEST` / `BIRDY_SELFTEST_MS` | 1 / 8000 | плавный тест серво при загрузке |
+| `BIRDY_VBAT_PIN` / `R_TOP` / `R_BOT` / `CAL_PCT` | 31 / 1000000 / 1500000 / 115 | делитель АКБ |
+| `BTHOME_PRPH_CONN` | 2 | число одновременных подключений |
+
+## Структура проекта
+
+```
+firmware/
+  base/          platformio.ini, src/{main.cpp,BTHome.*}, variants/nicenano
+  birdy-2ble/    platformio.ini, src/{main.cpp,BirdServo,BirdPiezo,BirdyCtl,battery,BTHome},
+                 variants/, docs/CONTROL-2BLE.md
+android/
+  birdy-app/     build.gradle.kts, app/src/main/java/com/airalab/birdy/*.kt
+docs/            INSTALL, WIRING, FLASHING, HOMEASSISTANT, ARCHITECTURE, ENERGY, TROUBLESHOOTING
+scripts/         elf2uf2.py
+```
+
+## Troubleshooting (короткое)
+
+| Симптом | Причина / решение |
 |---|---|
-| В HA статично 400 ppm / 0.0 °C / 0.0 % | прошивка v0.1.0 (баг двойного чтения). Перепрошить v1.0.0 |
-| `SCD41 begin: FAILED` | I²C-пины (SDA=17, SCL=20), VCC/GND, перепайка; опционально внешние pull-up 4.7 кОм |
-| HA не находит устройство | BLE-адаптер включён, плата запитана, в логе есть `BLE begin done` |
-| Батарея всегда 100 % | делитель напряжения не распаян — значение условное (см. limitations) |
-| Диск `NICENANO` пропадает при копировании | копировать сразу после появления диска (файл ~260 КБ) |
+| В HA статичные 400 ppm / 0.0 °C | нет свежих данных с датчика → проверить I²C (SDA P0.17, SCL P0.20) и питание; birdy-2ble сам лечит шину |
+| Устройства нет в HA / в приложении | реклама идёт окнами ~30 с раз в минуту — подождать; проверить питание |
+| Серво дёргается или гудит | сузить крайние углы (`alive`/`dead`), уменьшить `sec` |
+| Постоянный писк | трель зависла → перезагрузка; в актуальной прошивке исправлено |
+| Батарея врёт | подобрать `batcal` по мультиметру, поставить 100 нФ с P0.31 на GND |
+
+Полный список: [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
+
+## Документация
+
+- [docs/INSTALL.md](docs/INSTALL.md) — установка инструментов
+- [docs/WIRING.md](docs/WIRING.md) — распиновка и схема
+- [docs/FLASHING.md](docs/FLASHING.md) — прошивка (UF2 / DFU)
+- [docs/HOMEASSISTANT.md](docs/HOMEASSISTANT.md) — интеграция с HA
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — архитектура прошивки
+- [docs/ENERGY.md](docs/ENERGY.md) — энергобюджет и автономность
+- [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — типовые проблемы
+- [firmware/birdy-2ble/docs/CONTROL-2BLE.md](firmware/birdy-2ble/docs/CONTROL-2BLE.md) — BLE-протокол
+- [android/birdy-app/README.md](android/birdy-app/README.md) — приложение
 
 ## Contributing
 
-Ветки `bionic/…` или `feat/…`, коммиты в стиле [Conventional Commits](https://www.conventionalcommits.org/ru-hyphen/), PR — на `main`. Полные правила — [CONTRIBUTING.md](CONTRIBUTING.md). Поведение в проекте — [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+См. [CONTRIBUTING.md](CONTRIBUTING.md) и [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+История изменений — [CHANGELOG.md](CHANGELOG.md).
 
-## License
+## Лицензия
 
-[MIT](LICENSE) (c) 2026 Airalab-Rus. Зависимости и их лицензии — в конце LICENSE.
-
-## Доки
-
-- [docs/INSTALL.md](docs/INSTALL.md) — установка с нуля
-- [docs/WIRING.md](docs/WIRING.md) — распиновка
-- [docs/FLASHING.md](docs/FLASHING.md) — прошивка UF2
-- [docs/HOMEASSISTANT.md](docs/HOMEASSISTANT.md) — настройка HA
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — архитектура + история бага
-- [docs/ENERGY.md](docs/ENERGY.md) — энергобюджет и расчёт автономности
-- [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) — ошибки и решения
+MIT — см. [LICENSE](LICENSE).
