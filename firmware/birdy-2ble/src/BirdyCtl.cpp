@@ -367,6 +367,7 @@ static void handleText(char *buf) {
     else if (!strcasecmp(tok, "down")) { if (_hooks.chirp) _hooks.chirp(false); }
     else if (!strcasecmp(tok, "reset")) { birdyCtlReset(); changed = true; }
     else if (!strcasecmp(tok, "toff") && eq) { _run.toffTenths = (int16_t)v; changed = true; }
+    else if (!strcasecmp(tok, "dfu")) { if (_hooks.enterDfu) _hooks.enterDfu(); }
     else {
       ok = false;
     }

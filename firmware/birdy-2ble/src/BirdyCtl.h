@@ -65,6 +65,7 @@ struct BirdyHooks {
   void (*chirp)(bool up);             /* проиграть трель (тест) */
   void (*sweep)(void);                /* свип серво (тест) */
   void (*moveTo)(int percent);        /* сразу поставить серво в положение % */
+  void (*enterDfu)(void);             /* переход в DFU-бутлоадер (OTA) */
 };
 
 void birdyCtlBegin(const BirdyHooks &hooks);

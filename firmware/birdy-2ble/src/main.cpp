@@ -15,6 +15,7 @@
  *   пьезо     = P0.22 (BIRDY_PIEZO_PIN)
  */
 #include <Arduino.h>
+#include <bluefruit.h>   /* BLEDfu, enterUf2Dfu */
 #include <Wire.h>
 #include <SparkFun_SCD4x_Arduino_Library.h>
 #include "BTHome.h"
@@ -35,6 +36,7 @@
 
 SCD4x mySensor;
 BTHome bthome;
+BLEDfu bledfu;      /* OTA DFU по BLE: телефон переводит плату в бутлоадер сам */
 BirdServo birdyServo;
 BirdPiezo birdyPiezo;
 
@@ -94,6 +96,10 @@ static void hookChirp(bool up) {
 static void hookSweep(void) {
 	g_pendingSweep = true; /* плавный тест ~12 с — выполняем в loop(), не в BLE-потоке */
 }
+
+/* OTA: переход в DFU-бутлоадер. Выполняем в loop(): enterUf2Dfu() не возвращается. */
+static volatile bool g_pendingDfu = false;
+static void hookDfu(void) { g_pendingDfu = true; }
 
 /* Плавный ход с ожиданием (easeInOut из BirdServo, шаг 10 мс). */
 static void servoMoveBlocking(int percent, uint32_t maxMs) {
@@ -185,12 +191,17 @@ void setup() {
 	bthome.begin(DEVICE_NAME, false, "", false);
 	Serial.println("[boot] BLE begin (2 conn)");
 
+	/* OTA DFU-сервис: должен стартовать раньше остальных сервисов. */
+	bledfu.begin();
+	Serial.println("[boot] BLEDfu (OTA) готов");
+
 	/* Управление: NVS + GATT-сервис 0xFFF0. */
 	BirdyHooks hooks;
 	hooks.applySettings = hookApplySettings;
 	hooks.chirp = hookChirp;
 	hooks.sweep = hookSweep;
 	hooks.moveTo = hookMoveTo;
+	hooks.enterDfu = hookDfu;
 	birdyCtlBegin(hooks);
 
 	/* АКБ: делитель на P0.31. */
@@ -430,6 +441,15 @@ void loop() {
 		g_pendingSweep = false;
 		servoCalibrationSweep();
 		birdyCtlText("ok sweep");
+	}
+
+	/* OTA: команда dfu — уходим в бутлоадер (без двойного RESET). */
+	if (g_pendingDfu) {
+		g_pendingDfu = false;
+		Serial.println("[dfu] переход в DFU-бутлоадер");
+		birdyCtlText("ok dfu");
+		delay(300); /* дать уйти ответу */
+		enterUf2Dfu();
 	}
 
 	/* Трель по команде из BLE — запускаем в основном потоке. */

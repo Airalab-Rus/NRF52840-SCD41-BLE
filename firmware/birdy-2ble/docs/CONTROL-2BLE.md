@@ -48,6 +48,7 @@ ok thr=1200 hyst=80 alive=-20 dead=100 sec=8 snd=1 co2=1180 deadstate=0
 | `goto=<%>` | сразу поставить серво в положение (−100…100) — для подбора углов |
 | `batcal=<%>` | поправка АКБ по мультиметру (50…200, сейчас 115) |
 | `get` / `bat` | только прочитать значения / напряжение АКБ |
+| `dfu` | перейти в DFU-бутлоадер (OTA по BLE) |
 
 Можно отправлять по одному или несколько через пробел. Всё сохраняется в NVS.
 
@@ -144,3 +145,39 @@ ok thr=1200 hyst=80 alive=-20 dead=100 sec=8 snd=1 co2=1180 deadstate=0
 - `2BLE` — отладочная ветка: connectable-реклама и 30-секундное окно тратят
   больше энергии, чем чистый BTHome (для батарейного варианта окно можно
   уменьшить через `BIRDY_ADV_WINDOW_SEC`).
+
+## OTA DFU по BLE (без двойного RESET)
+
+В прошивке поднят сервис `BLEDfu` (Nordic legacy DFU), поэтому плату можно
+перепрошивать по воздуху — кнопки не нужны.
+
+### 1. Собрать DFU-пакет
+
+`firmware.zip` от PlatformIO для BLE-DFU **не подходит** — нужен пакет
+`adafruit-nrfutil`:
+
+```bash
+pip install adafruit-nrfutil
+pio run -d firmware/birdy-2ble
+adafruit-nrfutil dfu genpkg --dev-type 0x0052 \
+  --application firmware/birdy-2ble/.pio/build/nicenano/firmware.hex \
+  CO2-Birdy-2BLE-dfu.zip
+```
+
+### 2. Залить с телефона
+
+1. Установить **Bluefruit Connect** (iOS/Android).
+2. Подключиться к `CO2-Birdy`.
+3. Меню **DFU** → выбрать `CO2-Birdy-2BLE-dfu.zip` → Upload.
+   Приложение само переведёт плату в бутлоадер и вернёт в приложение.
+
+### Альтернатива — вручную перевести в DFU
+
+Отправить текстовую команду `dfu` (nRF Connect / BLE Controller) — плата
+перезагрузится в бутлоадер и начнёт рекламироваться как `DfuTarg`.
+Дальше — DFU из Bluefruit Connect уже к `DfuTarg`.
+
+### Ограничения
+
+- OTA работает, только пока приложение живо и реклама идёт (окна по 30 с).
+- Если прошивка повисла намертво — только двойной RESET + UF2.
