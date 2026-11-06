@@ -113,7 +113,8 @@ void BirdPiezo::toneOut(uint16_t freqHz, uint8_t dutyPct) {
   uint32_t top = 16000000UL / (uint32_t)freqHz;
   if (top > 30000UL) top = 30000UL;
   if (top < 100UL) top = 100UL;
-  uint32_t duty = (top * (uint32_t)dutyPct) / 100U;
+  /* dutyPct (из огибающей Birdie) * громкость из настроек */
+  uint32_t duty = (top * (uint32_t)dutyPct * (uint32_t)_volPct) / 10000U;
   if (duty < 1) duty = 1;
   if (duty >= top) duty = top - 1;
 
@@ -192,6 +193,12 @@ void BirdPiezo::begin() {
   _pwm->writePin(BIRDY_PIEZO_PIN, 0);
   _ready = true;
   Serial.printf("[birdy] piezo begin: pin=%d (HardwarePWM)\n", (int)BIRDY_PIEZO_PIN);
+}
+
+void BirdPiezo::setVolume(uint8_t pct) {
+  if (pct > 100) pct = 100;
+  _volPct = pct;
+  Serial.printf("[birdy] громкость трели = %u %%\n", (unsigned)_volPct);
 }
 
 void BirdPiezo::stop() {

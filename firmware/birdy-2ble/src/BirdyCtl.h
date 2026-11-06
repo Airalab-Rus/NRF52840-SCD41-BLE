@@ -31,6 +31,7 @@ enum BirdyCmd : uint8_t {
   BCMD_SERVO_SWEEP = 0x0C, /* тест: свип серво */
   BCMD_GOTO        = 0x0D, /* arg: int8 — сразу перейти в положение (-100..100), для подбора углов */
   BCMD_SET_TOFF    = 0x0E, /* arg: int8 — смещение температуры в 0.1 °C (-50..50) */
+  BCMD_SET_VOL     = 0x0F, /* arg: 0..100 — громкость трели, % */
 };
 
 /* Коды ответа (первый байт notify в 0xFFF2) */
@@ -56,6 +57,10 @@ struct BirdyRuntime {
   uint8_t  chirpDownVar;
   uint8_t  batCalPct;   /* поправка АКБ, % (по мультиметру) */
   int16_t  toffTenths;  /* смещение температуры SCD41, 0.1 °C (-50..50) */
+  uint8_t  volume;      /* громкость трели, 0..100 % */
+  uint8_t  nightEnabled;/* ночной режим (звук выкл в диапазоне часов) */
+  uint8_t  nightFrom;   /* час начала тишины, 0..23 */
+  uint8_t  nightTo;     /* час конца тишины, 0..23 */
   uint16_t cfgVer;      /* версия конфига (для миграций) */
 };
 
@@ -82,6 +87,11 @@ void birdyCtlReportCode(uint8_t code);
 
 /** Текстовый ответ (характеристика 0xFFF5) во все подключения. */
 void birdyCtlText(const char *msg);
+
+/** Время суток в минутах (0..1439) или 0xFFFF, если часы не синхронизированы. */
+uint16_t birdyCtlClockMinutes(void);
+/** Сейчас «ночной» период (и часы синхронизированы)? */
+bool birdyCtlIsNight(void);
 
 /** Открыть окно connectable-рекламы для подключения телефонов. */
 void birdyCtlOpenWindow(uint16_t seconds);

@@ -68,10 +68,16 @@ static volatile bool g_pendingSweep = false;
  * Вместо неё — только смещение температуры (toff) и настройки птички. */
 
 /* Переприменить настройки из NVS к железу. */
+/* Звук разрешён: включён и не ночной режим. */
+static bool soundAllowed(void) {
+	return birdyRun().soundEnabled && !birdyCtlIsNight();
+}
+
 static void hookApplySettings(void) {
 	BirdyRuntime &r = birdyRun();
 	birdyServo.setTransitionMs((uint32_t)r.transitionSec * 1000UL);
 	batterySetCalPct(r.batCalPct);
+	birdyPiezo.setVolume(r.volume);
 	/* Сразу показываем новое положение ТЕКУЩЕГО состояния: иначе угол меняется,
 	 * а серво стоит до следующего перехода (и кажется, что настройка не работает). */
 	birdyServo.writePercent(birdDead ? r.angleDead : r.angleAlive);
@@ -129,7 +135,7 @@ static void servoCalibrationSweep(void) {
 	birdyServo.setTransitionMs(keepMs);
 
 	/* Чирик в конце теста (полностью отыгрываем здесь же). */
-	if (r.soundEnabled) {
+	if (soundAllowed()) {
 		birdyPiezo.playChirp(true, r.chirpUp, r.chirpUpVar);
 		uint32_t t0 = millis();
 		while (birdyPiezo.isPlaying() && (millis() - t0) < 3000UL) {
@@ -168,13 +174,13 @@ void updateBirdState(uint16_t co2ppm, bool valid) {
 			birdDead = true;
 			Serial.printf("[birdy] DEATH: co2=%u ppm >= %u\n", co2ppm, s.co2Bad);
 			birdyServo.writePercent(s.angleDead);
-			if (s.soundEnabled) birdyPiezo.playChirp(false, s.chirpDown, s.chirpDownVar);
+			if (soundAllowed()) birdyPiezo.playChirp(false, s.chirpDown, s.chirpDownVar);
 		} else if (birdDead && good && aliveTicks >= BIRDY_STATUS_REVIVE_TICKS) {
 			birdDead = false;
 			Serial.printf("[birdy] REVIVE: co2=%u ppm < %u\n", co2ppm,
 			              (unsigned)(s.co2Bad - s.hystPpm));
 			birdyServo.writePercent(s.angleAlive);
-			if (s.soundEnabled) birdyPiezo.playChirp(true, s.chirpUp, s.chirpUpVar);
+			if (soundAllowed()) birdyPiezo.playChirp(true, s.chirpUp, s.chirpUpVar);
 		}
 	}
 
@@ -457,7 +463,7 @@ void loop() {
 		const uint8_t c = g_pendingChirp;
 		g_pendingChirp = 0;
 		BirdyRuntime &rr = birdyRun();
-		if (rr.soundEnabled) {
+		if (soundAllowed()) {
 			birdyPiezo.playChirp(c == 1, c == 1 ? rr.chirpUp : rr.chirpDown,
 			                     c == 1 ? rr.chirpUpVar : rr.chirpDownVar);
 		}

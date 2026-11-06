@@ -28,6 +28,12 @@ data class Ui(
     val snd: Boolean = true,
     val batMv: Int = 0,
     val toff: Int = 0,      /* смещение температуры SCD41, 0.1 °C */
+    val vol: Int = 70,      /* громкость трели, % */
+    val night: Boolean = false,   /* ночной режим */
+    val nightFrom: Int = 22,
+    val nightTo: Int = 8,
+    val clockOk: Boolean = false, /* часы синхронизированы */
+    val nightNow: Boolean = false, /* сейчас внутри ночного периода */
     val rssi: Int = 0,
     val servo: Int = 0,
     val answer: String = "",
@@ -84,6 +90,9 @@ class BirdyVm(app: Application) : AndroidViewModel(app) {
             _ui.update { it.copy(connected = true, connecting = false, error = null) }
             ble.readInfo()
             startRssiPolling()
+            /* Часы платы синхронизируем с телефоном (для ночного режима). */
+            ble.send("time=" + java.time.LocalTime.now()
+                .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm")))
         }
 
         ble.onDisconnected = {
@@ -185,6 +194,26 @@ class BirdyVm(app: Application) : AndroidViewModel(app) {
         send("toff=$v")
     }
 
+    fun setVol(v: Int) {
+        _ui.update { it.copy(vol = v) }
+        send("vol=$v")
+    }
+
+    fun setNight(on: Boolean) {
+        _ui.update { it.copy(night = on) }
+        send("night=${if (on) 1 else 0}")
+    }
+
+    fun setNightFrom(h: Int) {
+        _ui.update { it.copy(nightFrom = h) }
+        send("nfrom=$h")
+    }
+
+    fun setNightTo(h: Int) {
+        _ui.update { it.copy(nightTo = h) }
+        send("nto=$h")
+    }
+
     /** Живой предпросмотр положения (пока тянешь ползунок). */
     fun preview(v: Int) {
         _ui.update { it.copy(servo = v) }
@@ -222,11 +251,17 @@ class BirdyVm(app: Application) : AndroidViewModel(app) {
         val toff = if (v.size >= 16) {
             ((v[14].toInt() and 0xFF) or ((v[15].toInt() and 0xFF) shl 8)).toShort().toInt()
         } else 0
+        val vol = if (v.size >= 17) v[16].toInt() and 0xFF else 70
+        val flags = if (v.size >= 18) v[17].toInt() and 0xFF else 0
+        val nfrom = if (v.size >= 19) v[18].toInt() and 0xFF else 22
+        val nto = if (v.size >= 20) v[19].toInt() and 0xFF else 8
 
         _ui.update {
             it.copy(
                 thr = thr, alive = alive, deadAngle = dead, sec = sec, snd = snd,
                 dead = deadState, co2 = co2, hyst = hyst, batMv = mv, toff = toff,
+                vol = vol, night = (flags and 1) != 0, clockOk = (flags and 2) != 0,
+                nightNow = (flags and 4) != 0, nightFrom = nfrom, nightTo = nto,
                 servo = if (deadState) dead else alive
             )
         }
@@ -252,6 +287,11 @@ class BirdyVm(app: Application) : AndroidViewModel(app) {
                 co2 = map["co2"]?.toIntOrNull() ?: s.co2,
                 batMv = map["bat"]?.removeSuffix("mv")?.toIntOrNull() ?: s.batMv,
                 toff = map["toff"]?.toIntOrNull() ?: s.toff,
+                vol = map["vol"]?.toIntOrNull() ?: s.vol,
+                night = map["night"]?.toIntOrNull()?.let { it != 0 } ?: s.night,
+                nightFrom = map["nfrom"]?.toIntOrNull() ?: s.nightFrom,
+                nightTo = map["nto"]?.toIntOrNull() ?: s.nightTo,
+                clockOk = map["clock"]?.let { it == "ok" } ?: s.clockOk,
             )
         }
     }

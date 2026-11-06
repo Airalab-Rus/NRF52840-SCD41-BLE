@@ -351,6 +351,45 @@ fun ControlScreen(ui: Ui, vm: BirdyVm) {
         }
 
         Spacer(Modifier.height(14.dp))
+        SectionCard("Звук") {
+            var vol by remember(ui.vol) { mutableStateOf(ui.vol.toFloat()) }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Громкость трели", color = Color.White, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                Text("${vol.roundToInt()} %", color = Green, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+            }
+            Slider(
+                value = vol,
+                onValueChange = { vol = it },
+                onValueChangeFinished = { vm.setVol(vol.roundToInt()) },
+                valueRange = 0f..100f,
+                steps = 19
+            )
+
+            Row(
+                Modifier.fillMaxWidth().padding(top = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Ночной режим", color = Color.White, fontSize = 14.sp)
+                    Text(
+                        when {
+                            !ui.clockOk -> "часы не синхронизированы — режим ждёт синхронизации"
+                            ui.nightNow -> "сейчас тишина"
+                            else -> "сейчас звук разрешён"
+                        },
+                        color = if (ui.nightNow) Amber else Color(0xFF6B7280), fontSize = 11.sp
+                    )
+                }
+                Switch(checked = ui.night, onCheckedChange = { vm.setNight(it) })
+            }
+
+            if (ui.night) {
+                HourRow("Тишина с", ui.nightFrom) { vm.setNightFrom(it) }
+                HourRow("Тишина до", ui.nightTo) { vm.setNightTo(it) }
+            }
+        }
+
+        Spacer(Modifier.height(14.dp))
         SectionCard("Проверка") {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 SmallButton("Замер", Modifier.weight(1f)) { vm.command("meas") }
@@ -427,6 +466,22 @@ fun ParamRow(
             steps = if (steps > 0) steps else 0
         )
     }
+}
+
+@Composable
+fun HourRow(title: String, hour: Int, onChange: (Int) -> Unit) {
+    var h by remember(hour) { mutableStateOf(hour.toFloat()) }
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(title, color = Color.White, fontSize = 14.sp, modifier = Modifier.weight(1f))
+        Text("%02d:00".format(h.roundToInt()), color = Blue, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+    }
+    Slider(
+        value = h,
+        onValueChange = { h = it },
+        onValueChangeFinished = { onChange(h.roundToInt()) },
+        valueRange = 0f..23f,
+        steps = 22
+    )
 }
 
 @Composable

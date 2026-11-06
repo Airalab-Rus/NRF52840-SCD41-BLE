@@ -29,10 +29,13 @@ public:
   void tick();
   /** family 0..5 — вид птицы; variant 0..5 — вариант трели (детюн + темп). */
   void playChirp(bool goingUp, uint8_t family, uint8_t variant = 0);
+  /** Громкость 0..100 % (масштабирует скважность PWM). */
+  void setVolume(uint8_t pct);
   void stop();
   bool isPlaying() const { return _playing; }
 
 private:
+  uint8_t _volPct = 70; /* громкость, % (из настроек) */
   bool _ready;
   bool _playing;
   bool _goingUp;

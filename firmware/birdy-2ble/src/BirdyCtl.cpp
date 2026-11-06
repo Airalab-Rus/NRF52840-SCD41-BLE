@@ -39,6 +39,28 @@ static volatile bool _forceMeasure = false;
 static uint32_t _winUntilMs = 0;
 static bool     _fsOk = false;
 
+/* ---------------- Часы (синхронизируются с телефона) ---------------- */
+static bool     _clockSet = false;
+static uint16_t _clockMin = 0;      /* время суток в минутах на момент установки */
+static uint32_t _clockSetMs = 0;
+
+uint16_t birdyCtlClockMinutes(void) {
+  if (!_clockSet) return 0xFFFF;
+  const uint32_t mins = (millis() - _clockSetMs) / 60000UL;
+  return (uint16_t)((_clockMin + mins) % 1440UL);
+}
+
+bool birdyCtlIsNight(void) {
+  if (!_run.nightEnabled) return false;
+  const uint16_t now = birdyCtlClockMinutes();
+  if (now == 0xFFFF) return false; /* часы не синхронизированы — не глушим звук */
+  const uint16_t from = (uint16_t)_run.nightFrom * 60U;
+  const uint16_t to = (uint16_t)_run.nightTo * 60U;
+  if (from == to) return false;
+  if (from < to) return (now >= from && now < to);
+  return (now >= from || now < to); /* период через полночь */
+}
+
 BirdyRuntime &birdyRun(void) { return _run; }
 
 /* --------------------------------- Дефолты --------------------------------- */
@@ -56,6 +78,10 @@ static BirdyRuntime defaults(void) {
   r.chirpDownVar   = BIRDY_CHIRP_DOWN_VAR;
   r.batCalPct      = 100; /* 100 %: делитель 15к/15к читается без поправки */
   r.toffTenths     = 0;   /* смещение температуры: 0 = как с завода */
+  r.volume         = 70;  /* громкость трели */
+  r.nightEnabled   = 0;
+  r.nightFrom      = 22;
+  r.nightTo        = 8;
   r.cfgVer         = BIRDY_CFG_VER;
   return r;
 }
@@ -75,6 +101,10 @@ static void clampRun(void) {
   if (_run.batCalPct > 400) _run.batCalPct = 400; /* 10 МОм делитель сильно просаживается */
   if (_run.toffTenths < -50) _run.toffTenths = -50;
   if (_run.toffTenths > 50)  _run.toffTenths = 50;
+  if (_run.volume > 100) _run.volume = 100;
+  _run.nightEnabled = _run.nightEnabled ? 1 : 0;
+  if (_run.nightFrom > 23) _run.nightFrom = 23;
+  if (_run.nightTo > 23)   _run.nightTo = 23;
 }
 
 static void loadCfg(void) {
@@ -110,6 +140,10 @@ static void loadCfg(void) {
     else if (!strcmp(ln, "cdownv"))  _run.chirpDownVar = (uint8_t)v;
     else if (!strcmp(ln, "batcal")) _run.batCalPct = (uint8_t)v;
     else if (!strcmp(ln, "toff"))   _run.toffTenths = (int16_t)v;
+    else if (!strcmp(ln, "vol"))    _run.volume = (uint8_t)v;
+    else if (!strcmp(ln, "night"))  _run.nightEnabled = (uint8_t)v;
+    else if (!strcmp(ln, "nfrom"))  _run.nightFrom = (uint8_t)v;
+    else if (!strcmp(ln, "nto"))    _run.nightTo = (uint8_t)v;
     else if (!strcmp(ln, "ver"))    _run.cfgVer = (uint16_t)v;
   }
   clampRun();
@@ -135,11 +169,13 @@ void birdyCtlSave(void) {
   char buf[256];
   int n = snprintf(buf, sizeof(buf),
                    "ver=%d\nco2bad=%u\nhyst=%u\nalive=%d\ndead=%d\nsec=%u\nsnd=%u\n"
-                   "cup=%u\ncdown=%u\ncupv=%u\ncdownv=%u\nbatcal=%u\ntoff=%d\n",
+                   "cup=%u\ncdown=%u\ncupv=%u\ncdownv=%u\nbatcal=%u\ntoff=%d\n"
+                   "vol=%u\nnight=%u\nnfrom=%u\nnto=%u\n",
                    BIRDY_CFG_VER, _run.co2Bad, _run.hystPpm, (int)_run.angleAlive,
                    (int)_run.angleDead, _run.transitionSec, _run.soundEnabled,
                    _run.chirpUp, _run.chirpDown, _run.chirpUpVar, _run.chirpDownVar,
-                   _run.batCalPct, (int)_run.toffTenths);
+                   _run.batCalPct, (int)_run.toffTenths,
+                   _run.volume, _run.nightEnabled, _run.nightFrom, _run.nightTo);
 
   File f(InternalFS);
   if (!f.open(BIRDY_CFG_PATH, FILE_O_WRITE)) {
@@ -178,7 +214,7 @@ static void notifyStatus(uint8_t code) {
 }
 
 static void updateInfo(void) {
-  uint8_t b[16];
+  uint8_t b[20];
   b[0]  = BIRDY_CFG_VER;
   b[1]  = (uint8_t)(_run.co2Bad & 0xFF);
   b[2]  = (uint8_t)(_run.co2Bad >> 8);
@@ -195,6 +231,10 @@ static void updateInfo(void) {
   b[13] = (uint8_t)(_lastMv >> 8);
   b[14] = (uint8_t)(_run.toffTenths & 0xFF);
   b[15] = (uint8_t)((_run.toffTenths >> 8) & 0xFF);
+  b[16] = _run.volume;
+  b[17] = (uint8_t)((_run.nightEnabled ? 1 : 0) | (_clockSet ? 2 : 0) | (birdyCtlIsNight() ? 4 : 0));
+  b[18] = _run.nightFrom;
+  b[19] = _run.nightTo;
   infoChr.write(b, sizeof(b));
 }
 
@@ -228,6 +268,13 @@ static void onCmdWrite(uint16_t conn_hdl, BLECharacteristic *chr, uint8_t *data,
       if (len < 2) { code = BST_BAD_ARG; break; }
       _run.toffTenths = (int16_t)(int8_t)data[1];
       clampRun();
+      if (_hooks.applySettings) _hooks.applySettings();
+      birdyCtlSave();
+      break;
+
+    case BCMD_SET_VOL:
+      if (len < 2) { code = BST_BAD_ARG; break; }
+      _run.volume = (data[1] > 100) ? 100 : data[1];
       if (_hooks.applySettings) _hooks.applySettings();
       birdyCtlSave();
       break;
@@ -320,10 +367,15 @@ static void onCmdWrite(uint16_t conn_hdl, BLECharacteristic *chr, uint8_t *data,
  *   "ok thr=1200 hyst=100 alive=0 dead=100 sec=8 snd=1 co2=1250 deadstate=1"
  */
 static void fmtStatusText(char *buf, size_t n) {
-  snprintf(buf, n, "thr=%u hyst=%u alive=%d dead=%d sec=%u snd=%u co2=%u deadstate=%u bat=%umv toff=%d",
+  const uint16_t mins = birdyCtlClockMinutes();
+  snprintf(buf, n,
+           "thr=%u hyst=%u alive=%d dead=%d sec=%u snd=%u co2=%u deadstate=%u bat=%umv "
+           "toff=%d vol=%u night=%u nfrom=%u nto=%u clock=%s time=%02u:%02u",
            _run.co2Bad, _run.hystPpm, (int)_run.angleAlive, (int)_run.angleDead,
            _run.transitionSec, _run.soundEnabled, _lastCo2, _dead ? 1 : 0, _lastMv,
-           (int)_run.toffTenths);
+           (int)_run.toffTenths, _run.volume, _run.nightEnabled, _run.nightFrom, _run.nightTo,
+           (mins == 0xFFFF) ? "no" : "ok",
+           (mins == 0xFFFF) ? 0 : mins / 60, (mins == 0xFFFF) ? 0 : mins % 60);
 }
 
 static void onTxtWrite(uint16_t conn_hdl, BLECharacteristic *chr, uint8_t *data, uint16_t len) {
@@ -345,10 +397,11 @@ static void handleText(char *buf) {
   char *saveptr = nullptr;
   for (char *tok = strtok_r(buf, " ,;", &saveptr); tok; tok = strtok_r(nullptr, " ,;", &saveptr)) {
     char *eq = strchr(tok, '=');
+    char *rawVal = (eq != nullptr) ? (eq + 1) : nullptr; /* нужен для time=HH:MM */
     long v = 0;
     if (eq) {
       *eq = 0;
-      v = atol(eq + 1);
+      v = atol(rawVal);
     }
 
     if (!strcasecmp(tok, "thr") && eq) { _run.co2Bad = (uint16_t)v; changed = true; }
@@ -367,6 +420,22 @@ static void handleText(char *buf) {
     else if (!strcasecmp(tok, "down")) { if (_hooks.chirp) _hooks.chirp(false); }
     else if (!strcasecmp(tok, "reset")) { birdyCtlReset(); changed = true; }
     else if (!strcasecmp(tok, "toff") && eq) { _run.toffTenths = (int16_t)v; changed = true; }
+    else if (!strcasecmp(tok, "vol") && eq) { _run.volume = (uint8_t)v; changed = true; }
+    else if (!strcasecmp(tok, "night") && eq) { _run.nightEnabled = v ? 1 : 0; changed = true; }
+    else if (!strcasecmp(tok, "nfrom") && eq) { _run.nightFrom = (uint8_t)v; changed = true; }
+    else if (!strcasecmp(tok, "nto") && eq) { _run.nightTo = (uint8_t)v; changed = true; }
+    else if (!strcasecmp(tok, "time")) {
+      int hh = -1, mm = -1;
+      if (rawVal != nullptr && sscanf(rawVal, "%d:%d", &hh, &mm) == 2 &&
+          hh >= 0 && hh < 24 && mm >= 0 && mm < 60) {
+        _clockMin = (uint16_t)(hh * 60 + mm);
+        _clockSetMs = millis();
+        _clockSet = true;
+        changed = true;
+      } else {
+        ok = false;
+      }
+    }
     else if (!strcasecmp(tok, "dfu")) { if (_hooks.enterDfu) _hooks.enterDfu(); }
     else {
       ok = false;
