@@ -1,6 +1,9 @@
 package com.airalab.birdy
 
 import android.app.Application
+import android.content.Intent
+import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Job
@@ -11,6 +14,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import no.nordicsemi.android.dfu.DfuProgressListenerAdapter
+import no.nordicsemi.android.dfu.DfuServiceInitiator
+import no.nordicsemi.android.dfu.DfuServiceListenerHelper
 
 /** Состояние экрана. */
 data class Ui(
@@ -38,6 +44,13 @@ data class Ui(
     val servo: Int = 0,
     val answer: String = "",
     val error: String? = null,
+    /* --- OTA DFU --- */
+    val dfuUri: String? = null,
+    val dfuName: String = "",
+    val dfuProgress: Int = -1,
+    val dfuStatus: String = "",
+    val dfuError: String? = null,
+    val dfuActive: Boolean = false,
 ) {
     /** Процент АКБ по кривой Li-Ion (3.3 В = 0 %, 4.2 В = 100 %). */
     val batPct: Int
@@ -78,10 +91,55 @@ class BirdyVm(app: Application) : AndroidViewModel(app) {
     private val _ui = MutableStateFlow(Ui())
     val ui: StateFlow<Ui> = _ui.asStateFlow()
 
+    private var lastAddress: String? = null
     private var scanJob: Job? = null
     private var refreshJob: Job? = null
     private var previewJob: Job? = null
     private var rssiJob: Job? = null
+
+    /* ------------------------------- OTA DFU ------------------------------- */
+
+    private val dfuListener = object : DfuProgressListenerAdapter() {
+        override fun onDeviceConnecting(a: String) {
+            _ui.update { it.copy(dfuStatus = "Подключение…", dfuActive = true) }
+        }
+        override fun onEnablingDfuMode(a: String) {
+            _ui.update { it.copy(dfuStatus = "Переход в бутлоадер…") }
+        }
+        override fun onDfuProcessStarting(a: String) {
+            _ui.update { it.copy(dfuStatus = "Старт обновления…") }
+        }
+        override fun onFirmwareValidating(a: String) {
+            _ui.update { it.copy(dfuStatus = "Проверка образа…") }
+        }
+        override fun onProgressChanged(
+            a: String, percent: Int, speed: Float, avgSpeed: Float,
+            currentPart: Int, partsTotal: Int
+        ) {
+            _ui.update { it.copy(dfuProgress = percent, dfuStatus = "Запись: $percent %") }
+        }
+        override fun onDfuCompleted(a: String) {
+            _ui.update {
+                it.copy(
+                    dfuProgress = 100, dfuActive = false,
+                    dfuStatus = "Готово! Плата перезагружается — подключитесь заново"
+                )
+            }
+            startScan()
+        }
+        override fun onDfuAborted(a: String) {
+            _ui.update { it.copy(dfuActive = false, dfuStatus = "Отменено") }
+        }
+        override fun onError(a: String, error: Int, errorType: Int, message: String?) {
+            _ui.update {
+                it.copy(
+                    dfuActive = false,
+                    dfuStatus = "Ошибка обновления",
+                    dfuError = "тип $errorType, код $error: ${message ?: ""}"
+                )
+            }
+        }
+    }
 
     init {
         ble.onDevices = { list -> _ui.update { it.copy(devices = list, scanning = true) } }
@@ -105,6 +163,67 @@ class BirdyVm(app: Application) : AndroidViewModel(app) {
         ble.onText = { t -> parseText(t) }
         ble.onRssi = { r -> _ui.update { it.copy(rssi = r) } }
         ble.onError = { e -> _ui.update { it.copy(error = e, connecting = false) } }
+
+        DfuServiceListenerHelper.registerProgressListener(app, dfuListener)
+    }
+
+    /** Выбранный .zip (DFU-пакет). */
+    fun setDfuFile(uri: Uri) {
+        var name = uri.lastPathSegment ?: "firmware.zip"
+        try {
+            getApplication<Application>().contentResolver
+                .query(uri, null, null, null, null)?.use { c ->
+                    val i = c.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (i >= 0 && c.moveToFirst()) name = c.getString(i) ?: name
+                }
+        } catch (_: Exception) {
+        }
+        try {
+            getApplication<Application>().contentResolver.takePersistableUriPermission(
+                uri, Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+        } catch (_: Exception) {
+        }
+        _ui.update { it.copy(dfuUri = uri.toString(), dfuName = name, dfuError = null, dfuStatus = "") }
+    }
+
+    /** Запуск OTA: отключаем GATT и отдаём адрес библиотеке DFU. */
+    fun startDfu() {
+        val s = _ui.value
+        val uriStr = s.dfuUri
+        val addr = lastAddress
+        if (uriStr == null) {
+            _ui.update { it.copy(dfuError = "Сначала выберите .zip с прошивкой") }
+            return
+        }
+        if (addr == null) {
+            _ui.update { it.copy(dfuError = "Сначала подключитесь к плате") }
+            return
+        }
+
+        ble.close() /* освобождаем GATT для DFU */
+        _ui.update {
+            it.copy(
+                connected = false, dfuActive = true, dfuProgress = 0,
+                dfuStatus = "Подготовка…", dfuError = null
+            )
+        }
+        try {
+            DfuServiceInitiator(addr)
+                .setDeviceName("DfuTarg")
+                .setKeepBond(false)
+                .setForeground(true)
+                .setPacketsReceiptNotificationsEnabled(true)
+                .setPacketsReceiptNotificationsValue(12)
+                .setForceScanningForNewAddressInLegacyDfu(true)
+                .setScanTimeout(30000)
+                .setZip(Uri.parse(uriStr))
+                .start(getApplication(), DfuService::class.java)
+        } catch (e: Exception) {
+            _ui.update {
+                it.copy(dfuActive = false, dfuStatus = "", dfuError = "Не удалось запустить DFU: ${e.message}")
+            }
+        }
     }
 
     /* ------------------------------ разрешения/скан ------------------------------ */
@@ -133,6 +252,7 @@ class BirdyVm(app: Application) : AndroidViewModel(app) {
     }
 
     fun connect(address: String) {
+        lastAddress = address
         scanJob?.cancel()
         _ui.update { it.copy(connecting = true, scanning = false, error = null) }
         ble.connect(address)
@@ -307,6 +427,10 @@ class BirdyVm(app: Application) : AndroidViewModel(app) {
     }
 
     override fun onCleared() {
+        try {
+            DfuServiceListenerHelper.unregisterProgressListener(getApplication(), dfuListener)
+        } catch (_: Exception) {
+        }
         ble.close()
         super.onCleared()
     }

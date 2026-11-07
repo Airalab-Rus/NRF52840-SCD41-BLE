@@ -30,6 +30,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Slider
@@ -404,8 +405,51 @@ fun ControlScreen(ui: Ui, vm: BirdyVm) {
         }
 
         Spacer(Modifier.height(14.dp))
+        SectionCard("Прошивка (OTA)") {
+            val picker = rememberLauncherForActivityResult(
+                ActivityResultContracts.OpenDocument()
+            ) { uri -> if (uri != null) vm.setDfuFile(uri) }
+
+            Text(
+                if (ui.dfuName.isBlank()) "Файл не выбран" else ui.dfuName,
+                color = if (ui.dfuName.isBlank()) Color(0xFF6B7280) else Color.White,
+                fontSize = 13.sp
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SmallButton("Выбрать .zip", Modifier.weight(1f)) {
+                    picker.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
+                }
+                SmallButton(
+                    if (ui.dfuActive) "Идёт…" else "Обновить",
+                    Modifier.weight(1f)
+                ) {
+                    if (!ui.dfuActive) vm.startDfu()
+                }
+            }
+            if (ui.dfuActive || ui.dfuProgress >= 0) {
+                Spacer(Modifier.height(10.dp))
+                LinearProgressIndicator(
+                    progress = (ui.dfuProgress.coerceIn(0, 100)) / 100f,
+                    modifier = Modifier.fillMaxWidth().height(8.dp)
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(ui.dfuStatus, color = Color(0xFF98A2B3), fontSize = 11.sp)
+            }
+            if (ui.dfuError != null) {
+                Spacer(Modifier.height(6.dp))
+                Text(ui.dfuError, color = Red, fontSize = 11.sp)
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                "Нужен .zip из adafruit-nrfutil. Плата перезагрузится; телефон держи рядом ~1–2 мин.",
+                color = Color(0xFF6B7280), fontSize = 11.sp
+            )
+        }
+
+        Spacer(Modifier.height(14.dp))
         Row(Modifier.fillMaxWidth().padding(bottom = 24.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            SmallButton("Обновить", Modifier.weight(1f)) { vm.refresh() }
+            SmallButton("Обновить данные", Modifier.weight(1f)) { vm.refresh() }
             SmallButton("Выход", Modifier.weight(1f)) { vm.disconnect() }
         }
 
