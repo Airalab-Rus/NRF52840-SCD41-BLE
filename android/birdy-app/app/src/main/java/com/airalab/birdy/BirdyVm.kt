@@ -3,11 +3,14 @@ package com.airalab.birdy
 import android.app.Application
 import android.content.Intent
 import android.net.Uri
+import androidx.core.content.FileProvider
 import android.provider.OpenableColumns
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -17,6 +20,10 @@ import kotlinx.coroutines.launch
 import no.nordicsemi.android.dfu.DfuProgressListenerAdapter
 import no.nordicsemi.android.dfu.DfuServiceInitiator
 import no.nordicsemi.android.dfu.DfuServiceListenerHelper
+import java.io.File
+import java.io.IOException
+import java.net.HttpURLConnection
+import java.net.URL
 
 /** Состояние экрана. */
 data class Ui(
@@ -51,6 +58,8 @@ data class Ui(
     val dfuStatus: String = "",
     val dfuError: String? = null,
     val dfuActive: Boolean = false,
+    val downloading: Boolean = false,
+    val dlProgress: Int = 0,
 ) {
     /** Процент АКБ по кривой Li-Ion (3.3 В = 0 %, 4.2 В = 100 %). */
     val batPct: Int
@@ -84,6 +93,9 @@ data class Ui(
             else -> 0xFF2FBF71
         }
 }
+
+private const val FIRMWARE_URL =
+    "https://github.com/Airalab-Rus/NRF52840-SCD41-BLE/releases/latest/download/CO2-Birdy-2BLE-dfu.zip"
 
 class BirdyVm(app: Application) : AndroidViewModel(app) {
 
@@ -185,6 +197,70 @@ class BirdyVm(app: Application) : AndroidViewModel(app) {
         } catch (_: Exception) {
         }
         _ui.update { it.copy(dfuUri = uri.toString(), dfuName = name, dfuError = null, dfuStatus = "") }
+    }
+
+    /** Скачать последний DFU-пакет с GitHub Releases. */
+    fun downloadFirmware() {
+        if (_ui.value.downloading) return
+        _ui.update {
+            it.copy(downloading = true, dlProgress = 0, dfuError = null, dfuStatus = "Скачивание с GitHub…")
+        }
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    val app = getApplication<Application>()
+                    val conn = (URL(FIRMWARE_URL).openConnection() as HttpURLConnection).apply {
+                        instanceFollowRedirects = true
+                        connectTimeout = 15000
+                        readTimeout = 30000
+                        setRequestProperty("User-Agent", "BirdyApp")
+                    }
+                    conn.connect()
+                    val code = conn.responseCode
+                    if (code !in 200..299) throw IOException("HTTP $code (релиз не найден?)")
+                    val total = conn.contentLengthLong
+                    val file = File(app.cacheDir, "firmware-dfu.zip")
+                    conn.inputStream.use { input ->
+                        file.outputStream().use { out ->
+                            val buf = ByteArray(16 * 1024)
+                            var done = 0L
+                            while (true) {
+                                val read = input.read(buf)
+                                if (read <= 0) break
+                                out.write(buf, 0, read)
+                                done += read
+                                if (total > 0) {
+                                    val p = (done * 100 / total).toInt()
+                                    _ui.update { it.copy(dlProgress = p) }
+                                }
+                            }
+                        }
+                    }
+                    conn.disconnect()
+
+                    /* базовые проверки: это должен быть zip-пакет DFU */
+                    if (file.length() < 20_000) throw IOException("файл слишком маленький")
+                    val uri = FileProvider.getUriForFile(
+                        app, "${app.packageName}.fileprovider", file
+                    )
+                    _ui.update {
+                        it.copy(
+                            downloading = false, dlProgress = 100,
+                            dfuUri = uri.toString(),
+                            dfuName = "CO2-Birdy-2BLE-dfu.zip · ${file.length() / 1024} КБ",
+                            dfuStatus = "Скачано — можно обновлять"
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                _ui.update {
+                    it.copy(
+                        downloading = false,
+                        dfuError = "Не удалось скачать: ${e.message}"
+                    )
+                }
+            }
+        }
     }
 
     /** Запуск OTA: отключаем GATT и отдаём адрес библиотеке DFU. */

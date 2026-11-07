@@ -417,24 +417,35 @@ fun ControlScreen(ui: Ui, vm: BirdyVm) {
             )
             Spacer(Modifier.height(8.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                SmallButton(
+                    if (ui.downloading) "Качаю…" else "Скачать с GitHub",
+                    Modifier.weight(1f)
+                ) {
+                    if (!ui.downloading) vm.downloadFirmware()
+                }
                 SmallButton("Выбрать .zip", Modifier.weight(1f)) {
                     picker.launch(arrayOf("application/zip", "application/octet-stream", "*/*"))
                 }
-                SmallButton(
-                    if (ui.dfuActive) "Идёт…" else "Обновить",
-                    Modifier.weight(1f)
-                ) {
-                    if (!ui.dfuActive) vm.startDfu()
-                }
             }
-            if (ui.dfuActive || ui.dfuProgress >= 0) {
+            Spacer(Modifier.height(8.dp))
+            SmallButton(
+                if (ui.dfuActive) "Идёт обновление…" else "Обновить по воздуху",
+                Modifier.fillMaxWidth()
+            ) {
+                if (!ui.dfuActive) vm.startDfu()
+            }
+            if (ui.downloading || ui.dfuActive || ui.dfuProgress >= 0) {
+                val p = if (ui.downloading) ui.dlProgress else ui.dfuProgress
                 Spacer(Modifier.height(10.dp))
                 LinearProgressIndicator(
-                    progress = (ui.dfuProgress.coerceIn(0, 100)) / 100f,
+                    progress = (p.coerceIn(0, 100)) / 100f,
                     modifier = Modifier.fillMaxWidth().height(8.dp)
                 )
                 Spacer(Modifier.height(6.dp))
-                Text(ui.dfuStatus, color = Color(0xFF98A2B3), fontSize = 11.sp)
+                Text(
+                    if (ui.downloading) "Скачивание: ${ui.dlProgress} %" else ui.dfuStatus,
+                    color = Color(0xFF98A2B3), fontSize = 11.sp
+                )
             }
             if (ui.dfuError != null) {
                 Spacer(Modifier.height(6.dp))
