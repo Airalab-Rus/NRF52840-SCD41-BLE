@@ -10,7 +10,9 @@ android {
     defaultConfig {
         applicationId = "com.airalab.birdy"
         minSdk = 26
-        targetSdk = 34
+        /* 33: библиотека DFU 2.6.0 стартует foreground-сервис без типа,
+           на targetSdk 34 Android 14 роняет процесс (MissingForegroundServiceTypeException). */
+        targetSdk = 33
         versionCode = 1
         versionName = "1.0"
     }

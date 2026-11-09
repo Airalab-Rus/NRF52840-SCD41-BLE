@@ -47,6 +47,8 @@ data class Ui(
     val nightTo: Int = 8,
     val clockOk: Boolean = false, /* часы синхронизированы */
     val nightNow: Boolean = false, /* сейчас внутри ночного периода */
+    val fwVer: Int = 0,           /* версия конфига прошивки (INFO[0]) */
+    val supportsNight: Boolean = false, /* прошивка умеет громкость/ночь (INFO >= 20) */
     val rssi: Int = 0,
     val servo: Int = 0,
     val answer: String = "",
@@ -285,6 +287,11 @@ class BirdyVm(app: Application) : AndroidViewModel(app) {
             )
         }
         try {
+            /* канал уведомлений создаём заранее: без него startForeground в сервисе падает */
+            try {
+                DfuServiceInitiator.createDfuNotificationChannel(getApplication())
+            } catch (_: Exception) {
+            }
             DfuServiceInitiator(addr)
                 .setDeviceName("DfuTarg")
                 .setKeepBond(false)
@@ -295,9 +302,12 @@ class BirdyVm(app: Application) : AndroidViewModel(app) {
                 .setScanTimeout(30000)
                 .setZip(Uri.parse(uriStr))
                 .start(getApplication(), DfuService::class.java)
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             _ui.update {
-                it.copy(dfuActive = false, dfuStatus = "", dfuError = "Не удалось запустить DFU: ${e.message}")
+                it.copy(
+                    dfuActive = false, dfuStatus = "",
+                    dfuError = "Не удалось запустить DFU: ${e.javaClass.simpleName}: ${e.message}"
+                )
             }
         }
     }
@@ -391,11 +401,23 @@ class BirdyVm(app: Application) : AndroidViewModel(app) {
     }
 
     fun setVol(v: Int) {
+        if (!_ui.value.supportsNight) {
+            _ui.update {
+                it.copy(dfuError = "Прошивка платы v${it.fwVer} не знает громкость — обновите прошивку (OTA)")
+            }
+            return
+        }
         _ui.update { it.copy(vol = v) }
         send("vol=$v")
     }
 
     fun setNight(on: Boolean) {
+        if (!_ui.value.supportsNight) {
+            _ui.update {
+                it.copy(dfuError = "Прошивка платы v${it.fwVer} не знает ночной режим — обновите прошивку (OTA)")
+            }
+            return
+        }
         _ui.update { it.copy(night = on) }
         send("night=${if (on) 1 else 0}")
     }
@@ -451,6 +473,8 @@ class BirdyVm(app: Application) : AndroidViewModel(app) {
         val flags = if (v.size >= 18) v[17].toInt() and 0xFF else 0
         val nfrom = if (v.size >= 19) v[18].toInt() and 0xFF else 22
         val nto = if (v.size >= 20) v[19].toInt() and 0xFF else 8
+        val fwVer = v[0].toInt() and 0xFF
+        val supports = v.size >= 20
 
         _ui.update {
             it.copy(
@@ -458,6 +482,7 @@ class BirdyVm(app: Application) : AndroidViewModel(app) {
                 dead = deadState, co2 = co2, hyst = hyst, batMv = mv, toff = toff,
                 vol = vol, night = (flags and 1) != 0, clockOk = (flags and 2) != 0,
                 nightNow = (flags and 4) != 0, nightFrom = nfrom, nightTo = nto,
+                fwVer = fwVer, supportsNight = supports,
                 servo = if (deadState) dead else alive
             )
         }

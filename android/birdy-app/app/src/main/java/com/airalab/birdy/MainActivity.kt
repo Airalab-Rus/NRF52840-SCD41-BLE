@@ -74,6 +74,7 @@ private val Blue = Color(0xFF4C8DFF)
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        CrashLog.install(applicationContext)
         setContent {
             val vm: BirdyVm = viewModel()
             val ui by vm.ui.collectAsStateWithLifecycle()
@@ -223,6 +224,8 @@ fun ScanScreen(ui: Ui, vm: BirdyVm, onGrant: () -> Unit) {
 
 @Composable
 fun ControlScreen(ui: Ui, vm: BirdyVm) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    var crash by remember { mutableStateOf(CrashLog.read(ctx)) }
     Column(
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)
     ) {
@@ -363,7 +366,8 @@ fun ControlScreen(ui: Ui, vm: BirdyVm) {
                 onValueChange = { vol = it },
                 onValueChangeFinished = { vm.setVol(vol.roundToInt()) },
                 valueRange = 0f..100f,
-                steps = 19
+                steps = 19,
+                enabled = ui.supportsNight
             )
 
             Row(
@@ -381,7 +385,18 @@ fun ControlScreen(ui: Ui, vm: BirdyVm) {
                         color = if (ui.nightNow) Amber else Color(0xFF6B7280), fontSize = 11.sp
                     )
                 }
-                Switch(checked = ui.night, onCheckedChange = { vm.setNight(it) })
+                Switch(
+                    checked = ui.night,
+                    onCheckedChange = { vm.setNight(it) },
+                    enabled = ui.supportsNight
+                )
+            }
+            if (!ui.supportsNight) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Прошивка платы v${ui.fwVer} не поддерживает громкость/ночной режим — обновите прошивку (OTA).",
+                    color = Amber, fontSize = 11.sp
+                )
             }
 
             if (ui.night) {
@@ -406,6 +421,12 @@ fun ControlScreen(ui: Ui, vm: BirdyVm) {
 
         Spacer(Modifier.height(14.dp))
         SectionCard("Прошивка (OTA)") {
+            Text(
+                "На плате: конфиг v${ui.fwVer}" + if (ui.supportsNight) " (актуальная)" else " — устарела",
+                color = if (ui.supportsNight) Color(0xFF6B7280) else Amber,
+                fontSize = 11.sp
+            )
+            Spacer(Modifier.height(6.dp))
             val picker = rememberLauncherForActivityResult(
                 ActivityResultContracts.OpenDocument()
             ) { uri -> if (uri != null) vm.setDfuFile(uri) }
@@ -450,6 +471,12 @@ fun ControlScreen(ui: Ui, vm: BirdyVm) {
             if (ui.dfuError != null) {
                 Spacer(Modifier.height(6.dp))
                 Text(ui.dfuError, color = Red, fontSize = 11.sp)
+            }
+            if (crash != null) {
+                Spacer(Modifier.height(6.dp))
+                Text("Прошлый запуск завершился ошибкой:", color = Amber, fontSize = 11.sp)
+                Text(crash ?: "", color = Color(0xFF6B7280), fontSize = 9.sp)
+                TextButton(onClick = { CrashLog.clear(ctx); crash = null }) { Text("Скрыть") }
             }
             Spacer(Modifier.height(6.dp))
             Text(
