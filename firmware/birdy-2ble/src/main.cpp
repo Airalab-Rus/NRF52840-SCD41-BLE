@@ -24,6 +24,7 @@
 #include "BirdPiezo.h"
 #include "BirdyCtl.h"
 #include "battery.h"
+#include "BirdyLog.h"
 
 #define MY_SDA_PIN 17               /* P0.17 — SDA SCD41 */
 #define MY_SCL_PIN 20               /* P0.20 — SCL SCD41 */
@@ -209,6 +210,9 @@ void setup() {
 	hooks.moveTo = hookMoveTo;
 	hooks.enterDfu = hookDfu;
 	birdyCtlBegin(hooks);
+
+	/* Журнал измерений (RAM + flash). */
+	logBegin();
 
 	/* АКБ: делитель на P0.31. */
 	batteryBegin();
@@ -432,6 +436,9 @@ void sendReport(bool haveData) {
 	const uint16_t pinMv = batteryReadPinMv();
 	Serial.printf("[bat] pin=%u mV -> vbat=%u mV, %u%%%s\n", pinMv, vbatMv, vbatPct,
 	              (vbatMv < BIRDY_VBAT_LOW_MV) ? "  LOW!" : "");
+	/* Пишем в журнал платы только достоверные замеры. */
+	if (haveData) logAppend(co2, temp, hum, vbatMv);
+
 	bthome.addMeasurement(ID_VOLTAGE, vbatMv / 1000.0f); /* 0.001 В */
 	bthome.addMeasurement(ID_BATTERY, vbatPct);
 	bthome.addMeasurement_state(STATE_BATTERY_LOW, (vbatMv < BIRDY_VBAT_LOW_MV) ? 1 : 0);

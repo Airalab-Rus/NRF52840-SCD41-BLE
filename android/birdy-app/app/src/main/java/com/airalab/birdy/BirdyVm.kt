@@ -25,6 +25,15 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 
+/** Запись журнала с платы (12 байт на устройстве). */
+data class LogRec(
+    val co2: Int,
+    val temp: Float,
+    val hum: Float,
+    val mv: Int,
+    val up: Long,      /* секунды с загрузки платы */
+)
+
 /** Состояние экрана. */
 data class Ui(
     val devices: List<BirdyBle.Found> = emptyList(),
@@ -62,6 +71,11 @@ data class Ui(
     val dfuActive: Boolean = false,
     val downloading: Boolean = false,
     val dlProgress: Int = 0,
+    /* --- журнал с платы --- */
+    val logRecs: List<LogRec> = emptyList(),
+    val logLoading: Boolean = false,
+    val logProgress: Int = 0,
+    val logError: String? = null,
 ) {
     /** Процент АКБ по кривой Li-Ion (3.3 В = 0 %, 4.2 В = 100 %). */
     val batPct: Int
@@ -106,6 +120,8 @@ class BirdyVm(app: Application) : AndroidViewModel(app) {
     val ui: StateFlow<Ui> = _ui.asStateFlow()
 
     private var lastAddress: String? = null
+    private var logTotal = 0
+    private var logNext = 0
     private var scanJob: Job? = null
     private var refreshJob: Job? = null
     private var previewJob: Job? = null
@@ -176,6 +192,7 @@ class BirdyVm(app: Application) : AndroidViewModel(app) {
         ble.onInfo = { v -> parseInfo(v) }
         ble.onText = { t -> parseText(t) }
         ble.onRssi = { r -> _ui.update { it.copy(rssi = r) } }
+        ble.onLog = { v -> handleLog(v) }
         ble.onError = { e -> _ui.update { it.copy(error = e, connecting = false) } }
 
         DfuServiceListenerHelper.registerProgressListener(app, dfuListener)
@@ -430,6 +447,86 @@ class BirdyVm(app: Application) : AndroidViewModel(app) {
     fun setNightTo(h: Int) {
         _ui.update { it.copy(nightTo = h) }
         send("nto=$h")
+    }
+
+    /* -------------------------------- журнал -------------------------------- */
+
+    /** Загрузить журнал из памяти платы. */
+    fun loadLog() {
+        if (!_ui.value.connected) {
+            _ui.update { it.copy(logError = "Нет подключения к плате") }
+            return
+        }
+        logTotal = 0
+        logNext = 0
+        _ui.update { it.copy(logLoading = true, logRecs = emptyList(), logProgress = 0, logError = null) }
+        if (!ble.logRequest(byteArrayOf(0x01))) {
+            _ui.update { it.copy(logLoading = false, logError = "Плата не поддерживает журнал") }
+            return
+        }
+        viewModelScope.launch {
+            delay(4000)
+            if (_ui.value.logLoading && _ui.value.logRecs.isEmpty()) {
+                _ui.update { it.copy(logLoading = false, logError = "Нет ответа от платы") }
+            }
+        }
+    }
+
+    fun clearLog() {
+        ble.logRequest(byteArrayOf(0x03))
+        _ui.update { it.copy(logRecs = emptyList(), logProgress = 100, logError = null) }
+    }
+
+    private fun requestChunk() {
+        val idx = logNext
+        ble.logRequest(byteArrayOf(0x02, (idx and 0xFF).toByte(), ((idx shr 8) and 0xFF).toByte()))
+    }
+
+    private fun handleLog(v: ByteArray) {
+        if (v.size < 4) return
+        when (v[0].toInt() and 0xFF) {
+            0x01 -> {
+                logTotal = (v[1].toInt() and 0xFF) or ((v[2].toInt() and 0xFF) shl 8)
+                if (logTotal == 0) {
+                    _ui.update { it.copy(logLoading = false, logProgress = 100) }
+                    return
+                }
+                logNext = 0
+                requestChunk()
+            }
+            0x02 -> {
+                val idx = (v[1].toInt() and 0xFF) or ((v[2].toInt() and 0xFF) shl 8)
+                val n = v[3].toInt() and 0xFF
+                if (idx != logNext || n == 0) {
+                    _ui.update { it.copy(logLoading = false, logError = "Сбой приёма (idx=$idx)") }
+                    return
+                }
+                val recs = ArrayList<LogRec>(n)
+                var off = 4
+                for (i in 0 until n) {
+                    if (off + 12 > v.size) break
+                    val co2 = (v[off].toInt() and 0xFF) or ((v[off + 1].toInt() and 0xFF) shl 8)
+                    val tRaw = (v[off + 2].toInt() and 0xFF) or ((v[off + 3].toInt() and 0xFF) shl 8)
+                    val hum = ((v[off + 4].toInt() and 0xFF) or ((v[off + 5].toInt() and 0xFF) shl 8)) / 100f
+                    val mv = (v[off + 6].toInt() and 0xFF) or ((v[off + 7].toInt() and 0xFF) shl 8)
+                    val up = (v[off + 8].toLong() and 0xFF) or
+                            ((v[off + 9].toLong() and 0xFF) shl 8) or
+                            ((v[off + 10].toLong() and 0xFF) shl 16) or
+                            ((v[off + 11].toLong() and 0xFF) shl 24)
+                    recs.add(LogRec(co2, tRaw.toShort().toInt() / 100f, hum, mv, up))
+                    off += 12
+                }
+                logNext += recs.size
+                _ui.update {
+                    it.copy(
+                        logRecs = it.logRecs + recs,
+                        logProgress = if (logTotal > 0) logNext * 100 / logTotal else 0
+                    )
+                }
+                if (logNext < logTotal) requestChunk()
+                else _ui.update { it.copy(logLoading = false, logProgress = 100) }
+            }
+        }
     }
 
     /** Живой предпросмотр положения (пока тянешь ползунок). */

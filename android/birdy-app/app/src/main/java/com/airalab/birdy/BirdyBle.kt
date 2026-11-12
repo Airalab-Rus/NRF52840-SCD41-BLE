@@ -39,6 +39,7 @@ class BirdyBle(private val ctx: Context) {
         val INFO: UUID = uuid16(0xFFF3)
         val TCMD: UUID = uuid16(0xFFF4)
         val TSTAT: UUID = uuid16(0xFFF5)
+        val LOG: UUID = uuid16(0xFFF6)
         private val CCCD: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
     }
 
@@ -51,6 +52,7 @@ class BirdyBle(private val ctx: Context) {
     var onDisconnected: (() -> Unit)? = null
     var onInfo: ((ByteArray) -> Unit)? = null
     var onText: ((String) -> Unit)? = null
+    var onLog: ((ByteArray) -> Unit)? = null
     var onRssi: ((Int) -> Unit)? = null
     var onError: ((String) -> Unit)? = null
 
@@ -64,6 +66,7 @@ class BirdyBle(private val ctx: Context) {
     private var cmdChr: BluetoothGattCharacteristic? = null
     private var txtChr: BluetoothGattCharacteristic? = null
     private var infoChr: BluetoothGattCharacteristic? = null
+    private var logChr: BluetoothGattCharacteristic? = null
 
     /* ------------------------------- разрешения ------------------------------- */
 
@@ -212,11 +215,15 @@ class BirdyBle(private val ctx: Context) {
             cmdChr = svc.getCharacteristic(CMD)
             txtChr = svc.getCharacteristic(TCMD)
             infoChr = svc.getCharacteristic(INFO)
+            logChr = svc.getCharacteristic(LOG)
             svc.getCharacteristic(STAT)?.let { enableNotify(g, it) }
             svc.getCharacteristic(TSTAT)?.let { enableNotify(g, it) }
+            logChr?.let { enableNotify(g, it) }
             onConnected?.invoke()
             readInfo()
             g.readRemoteRssi()
+            /* большой MTU — чтобы журнал забирать пачками */
+            try { g.requestMtu(247) } catch (_: Exception) {}
         }
 
         override fun onCharacteristicChanged(
@@ -264,6 +271,7 @@ class BirdyBle(private val ctx: Context) {
     private fun handleValue(ch: BluetoothGattCharacteristic, v: ByteArray) {
         when (ch.uuid) {
             INFO -> onInfo?.invoke(v)
+            LOG -> onLog?.invoke(v)
             TSTAT -> onText?.invoke(String(v, Charsets.UTF_8).trim())
             else -> { /* бинарный STAT игнорируем: info перечитывается отдельно */ }
         }
@@ -293,6 +301,24 @@ class BirdyBle(private val ctx: Context) {
     @SuppressLint("MissingPermission")
     fun readRssi() {
         gatt?.readRemoteRssi()
+    }
+
+    /** Команда в характеристику журнала (0xFFF6). */
+    @SuppressLint("MissingPermission")
+    fun logRequest(payload: ByteArray): Boolean {
+        val g = gatt ?: return false
+        val ch = logChr ?: return false
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            g.writeCharacteristic(ch, payload, BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT) ==
+                BluetoothStatusCodes.SUCCESS
+        } else {
+            @Suppress("DEPRECATION")
+            run {
+                ch.value = payload
+                ch.writeType = BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
+                g.writeCharacteristic(ch)
+            }
+        }
     }
 
     /** Команда текстом (прошивка принимает текст и в FFF4, и в FFF1). */

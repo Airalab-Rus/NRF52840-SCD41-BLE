@@ -1,5 +1,6 @@
 #include "BirdyCtl.h"
 #include "BirdConfig.h"
+#include "BirdyLog.h"
 #include <bluefruit.h>
 #include <strings.h>
 #include <Adafruit_LittleFS.h>
@@ -27,6 +28,7 @@ BLECharacteristic statChr(0xFFF2);  /* бинарный ответ */
 BLECharacteristic infoChr(0xFFF3);  /* бинарное чтение конфига */
 BLECharacteristic txtCmdChr(0xFFF4);  /* ТЕКСТОВЫЕ команды: thr=1200 alive=0 */
 BLECharacteristic txtStatChr(0xFFF5); /* ТЕКСТОВЫЙ ответ */
+BLECharacteristic logChr(0xFFF6);    /* ЖУРНАЛ: write = команда, notify = данные */
 
 /* --------------------------------- Состояние --------------------------------- */
 static BirdyRuntime _run;
@@ -485,6 +487,57 @@ static void onPeerDisconnect(uint16_t conn_hdl, uint8_t reason) {
   }
 }
 
+/* ----------------------------- Журнал измерений (0xFFF6) -----------------------------
+ * write 0x01                 -> notify [01, count_lo, count_hi, 0]
+ * write [02, idx_lo, idx_hi] -> notify [02, idx_lo, idx_hi, n, записи...]
+ * write 0x03                 -> очистить журнал
+ */
+static void onLogWrite(uint16_t conn_hdl, BLECharacteristic *chr, uint8_t *data, uint16_t len) {
+  (void)chr;
+  if (len < 1) return;
+
+  uint8_t pkt[4 + 20 * sizeof(BirdyLogRec)];
+  uint16_t out = 0;
+  const uint16_t total = logCount();
+
+  if (data[0] == 0x01) {
+    pkt[0] = 0x01;
+    pkt[1] = (uint8_t)(total & 0xFF);
+    pkt[2] = (uint8_t)(total >> 8);
+    pkt[3] = 0;
+    out = 4;
+  } else if (data[0] == 0x02 && len >= 3) {
+    const uint16_t idx = (uint16_t)data[1] | ((uint16_t)data[2] << 8);
+
+    uint16_t mtu = 23;
+    BLEConnection *conn = Bluefruit.Connection(conn_hdl);
+    if (conn != nullptr && conn->getMtu() > 23) mtu = conn->getMtu();
+    uint16_t maxRecs = (uint16_t)((mtu > 8) ? ((mtu - 8) / sizeof(BirdyLogRec)) : 1);
+    if (maxRecs < 1) maxRecs = 1;
+    if (maxRecs > 20) maxRecs = 20;
+
+    uint16_t cnt = 0;
+    for (uint16_t i = idx; i < total && cnt < maxRecs; i++, cnt++) {
+      BirdyLogRec r;
+      if (!logGet(i, &r)) break;
+      memcpy(pkt + 4 + cnt * sizeof(BirdyLogRec), &r, sizeof(r));
+    }
+    pkt[0] = 0x02;
+    pkt[1] = (uint8_t)(idx & 0xFF);
+    pkt[2] = (uint8_t)(idx >> 8);
+    pkt[3] = (uint8_t)cnt;
+    out = (uint16_t)(4 + cnt * sizeof(BirdyLogRec));
+  } else if (data[0] == 0x03) {
+    logClear();
+    pkt[0] = 0x03; pkt[1] = 0; pkt[2] = 0; pkt[3] = 0;
+    out = 4;
+  } else {
+    return;
+  }
+
+  logChr.notify(conn_hdl, pkt, out);
+}
+
 /* ---------------------------------- Публичное ---------------------------------- */
 void birdyCtlBegin(const BirdyHooks &hooks) {
   _hooks = hooks;
@@ -523,6 +576,12 @@ void birdyCtlBegin(const BirdyHooks &hooks) {
   txtStatChr.setProperties(CHR_PROPS_NOTIFY);
   txtStatChr.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
   txtStatChr.begin();
+
+  /* Журнал измерений: write (команды) + notify (данные). */
+  logChr.setProperties(CHR_PROPS_WRITE | CHR_PROPS_NOTIFY);
+  logChr.setPermission(SECMODE_OPEN, SECMODE_OPEN);
+  logChr.setWriteCallback(onLogWrite);
+  logChr.begin();
 
   updateInfo();
 
