@@ -437,12 +437,16 @@ void sendReport(bool haveData) {
 	Serial.printf("[bat] pin=%u mV -> vbat=%u mV, %u%%%s\n", pinMv, vbatMv, vbatPct,
 	              (vbatMv < BIRDY_VBAT_LOW_MV) ? "  LOW!" : "");
 	/* Пишем в журнал платы только достоверные замеры. */
+	Serial.println("[dbg] logAppend: begin"); Serial.flush();
 	if (haveData) logAppend(co2, temp, hum, vbatMv);
+	Serial.println("[dbg] logAppend: end"); Serial.flush();
 
 	bthome.addMeasurement(ID_VOLTAGE, vbatMv / 1000.0f); /* 0.001 В */
 	bthome.addMeasurement(ID_BATTERY, vbatPct);
 	bthome.addMeasurement_state(STATE_BATTERY_LOW, (vbatMv < BIRDY_VBAT_LOW_MV) ? 1 : 0);
+	Serial.println("[dbg] sendPacket: begin"); Serial.flush();
 	bthome.sendPacket(500);
+	Serial.println("[dbg] sendPacket: end"); Serial.flush();
 }
 
 /* ================================== loop ================================== */

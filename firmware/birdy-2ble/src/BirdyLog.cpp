@@ -1,6 +1,7 @@
 #include "BirdyLog.h"
 #include <Adafruit_LittleFS.h>
 #include <InternalFileSystem.h>
+#include "nrf_soc.h" /* sd_power_gpregret_*: прямой доступ к POWER запрещён при SoftDevice */
 
 using namespace Adafruit_LittleFS_Namespace;
 
@@ -25,6 +26,18 @@ struct Tier {
  * подряд журнал отключается, и плата грузится с пустым логом.
  * GPREGRET переживает программный сброс, но обнуляется при отключении питания. */
 static bool _enabled = true;
+
+/* GPREGRET защищён SoftDevice: только через sd_power_gpregret_* */
+static uint32_t gpGet(void) {
+  uint32_t v = 0;
+  if (sd_power_gpregret_get(0, &v) != NRF_SUCCESS) return 0;
+  return v;
+}
+
+static void gpSet(uint32_t v) {
+  sd_power_gpregret_clr(0, 0xFF);
+  sd_power_gpregret_set(0, v);
+}
 
 static BirdyLogRec _raw[BIRDY_LOG_RAW_MAX];
 static BirdyLogRec _hour[BIRDY_LOG_HOUR_MAX];
@@ -143,14 +156,14 @@ static void wipeStale(const char *path, uint16_t cap) {
 /* --------------------------------- API --------------------------------- */
 
 void logBegin(void) {
-  const uint32_t gr = NRF_POWER->GPREGRET;
+  const uint32_t gr = gpGet();
   if (gr >= 2) {
     _enabled = false;
     Serial.printf("[log] SAFE MODE: журнал отключён (сбросов подряд: %lu)\n",
                   (unsigned long)gr);
     return;
   }
-  NRF_POWER->GPREGRET = gr + 1;
+  gpSet(gr + 1);
 
   /* чистим всё, что не влезает в текущие размеры (файлы прошлых версий) */
   {
@@ -233,7 +246,7 @@ bool logGet(uint8_t tier, uint16_t idx, BirdyLogRec *out) {
 
 void logMarkAlive(void) {
   /* дошли до рабочего цикла — счётчик «страховки» больше не нужен */
-  NRF_POWER->GPREGRET = 0;
+  gpSet(0);
 }
 
 void logClear(void) {
