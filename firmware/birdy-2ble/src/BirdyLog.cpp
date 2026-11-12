@@ -124,6 +124,22 @@ static void loadTier(Tier &t) {
   Serial.printf("[log] %s: %u записей\n", t.path, t.h.count);
 }
 
+/* Файл от прежней (более крупной) версии не влезает в новый формат —
+ * удаляем, иначе LittleFS переполняется и драйвер flash делает abort(). */
+static void wipeStale(const char *path, uint16_t cap) {
+  File f(InternalFS);
+  if (!f.open(path, FILE_O_READ)) return;
+  const uint32_t sz = f.size();
+  f.close();
+  const uint32_t maxSz = (uint32_t)sizeof(TierHead) + (uint32_t)cap * (uint32_t)sizeof(BirdyLogRec);
+  if (sz > maxSz) {
+    InternalFS.remove(path);
+    Serial.printf("[log] удалён устаревший %s (%lu B '> ' %lu)", path,
+                  (unsigned long)sz, (unsigned long)maxSz);
+    Serial.println();
+  }
+}
+
 /* --------------------------------- API --------------------------------- */
 
 void logBegin(void) {
@@ -136,7 +152,7 @@ void logBegin(void) {
   }
   NRF_POWER->GPREGRET = gr + 1;
 
-  /* файл прошлой версии формата — удаляем, чтобы не занимал блоки */
+  /* чистим всё, что не влезает в текущие размеры (файлы прошлых версий) */
   {
     File old(InternalFS);
     if (old.open("/birdy.log", FILE_O_READ)) {
@@ -145,6 +161,7 @@ void logBegin(void) {
       Serial.println("[log] старый /birdy.log удалён");
     }
   }
+  for (uint8_t i = 0; i < LOG_TIER_NUM; i++) wipeStale(_tiers[i].path, _tiers[i].cap);
   for (uint8_t i = 0; i < LOG_TIER_NUM; i++) loadTier(_tiers[i]);
 }
 
