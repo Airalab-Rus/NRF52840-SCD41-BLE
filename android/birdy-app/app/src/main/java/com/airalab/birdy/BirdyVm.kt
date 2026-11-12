@@ -27,11 +27,11 @@ import java.net.URL
 
 /** Запись журнала с платы (12 байт на устройстве). */
 data class LogRec(
+    val ts: Long,      /* локальное время (unix + смещение пояса), сек */
     val co2: Int,
     val temp: Float,
     val hum: Float,
     val mv: Int,
-    val up: Long,      /* секунды с загрузки платы */
 )
 
 /** Состояние экрана. */
@@ -72,6 +72,7 @@ data class Ui(
     val downloading: Boolean = false,
     val dlProgress: Int = 0,
     /* --- журнал с платы --- */
+    val logTier: Int = 1,          /* 0 = 3 часа, 1 = 30 суток, 2 = год */
     val logRecs: List<LogRec> = emptyList(),
     val logLoading: Boolean = false,
     val logProgress: Int = 0,
@@ -181,6 +182,10 @@ class BirdyVm(app: Application) : AndroidViewModel(app) {
             /* Часы платы синхронизируем с телефоном (для ночного режима). */
             ble.send("time=" + java.time.LocalTime.now()
                 .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm")))
+            /* Эпоха = unix + смещение пояса: журнал и ночной режим получают реальное время */
+            val tzSec = java.util.TimeZone.getDefault()
+                .getOffset(System.currentTimeMillis()) / 1000L
+            ble.send("epoch=" + (System.currentTimeMillis() / 1000L + tzSec))
         }
 
         ble.onDisconnected = {
@@ -451,16 +456,21 @@ class BirdyVm(app: Application) : AndroidViewModel(app) {
 
     /* -------------------------------- журнал -------------------------------- */
 
-    /** Загрузить журнал из памяти платы. */
-    fun loadLog() {
+    /** Загрузить журнал выбранного уровня: 0 = 3 ч, 1 = 30 сут, 2 = год. */
+    fun loadLog(tier: Int = _ui.value.logTier) {
         if (!_ui.value.connected) {
             _ui.update { it.copy(logError = "Нет подключения к плате") }
             return
         }
         logTotal = 0
         logNext = 0
-        _ui.update { it.copy(logLoading = true, logRecs = emptyList(), logProgress = 0, logError = null) }
-        if (!ble.logRequest(byteArrayOf(0x01))) {
+        _ui.update {
+            it.copy(
+                logTier = tier, logLoading = true, logRecs = emptyList(),
+                logProgress = 0, logError = null
+            )
+        }
+        if (!ble.logRequest(byteArrayOf(0x01, tier.toByte()))) {
             _ui.update { it.copy(logLoading = false, logError = "Плата не поддерживает журнал") }
             return
         }
@@ -479,14 +489,19 @@ class BirdyVm(app: Application) : AndroidViewModel(app) {
 
     private fun requestChunk() {
         val idx = logNext
-        ble.logRequest(byteArrayOf(0x02, (idx and 0xFF).toByte(), ((idx shr 8) and 0xFF).toByte()))
+        ble.logRequest(
+            byteArrayOf(
+                0x02, _ui.value.logTier.toByte(),
+                (idx and 0xFF).toByte(), ((idx shr 8) and 0xFF).toByte()
+            )
+        )
     }
 
     private fun handleLog(v: ByteArray) {
         if (v.size < 4) return
         when (v[0].toInt() and 0xFF) {
             0x01 -> {
-                logTotal = (v[1].toInt() and 0xFF) or ((v[2].toInt() and 0xFF) shl 8)
+                logTotal = (v[2].toInt() and 0xFF) or ((v[3].toInt() and 0xFF) shl 8)
                 if (logTotal == 0) {
                     _ui.update { it.copy(logLoading = false, logProgress = 100) }
                     return
@@ -495,25 +510,24 @@ class BirdyVm(app: Application) : AndroidViewModel(app) {
                 requestChunk()
             }
             0x02 -> {
-                val idx = (v[1].toInt() and 0xFF) or ((v[2].toInt() and 0xFF) shl 8)
-                val n = v[3].toInt() and 0xFF
+                if (v.size < 6) return
+                val idx = (v[2].toInt() and 0xFF) or ((v[3].toInt() and 0xFF) shl 8)
+                val n = v[4].toInt() and 0xFF
                 if (idx != logNext || n == 0) {
                     _ui.update { it.copy(logLoading = false, logError = "Сбой приёма (idx=$idx)") }
                     return
                 }
                 val recs = ArrayList<LogRec>(n)
-                var off = 4
+                var off = 6
                 for (i in 0 until n) {
                     if (off + 12 > v.size) break
-                    val co2 = (v[off].toInt() and 0xFF) or ((v[off + 1].toInt() and 0xFF) shl 8)
-                    val tRaw = (v[off + 2].toInt() and 0xFF) or ((v[off + 3].toInt() and 0xFF) shl 8)
-                    val hum = ((v[off + 4].toInt() and 0xFF) or ((v[off + 5].toInt() and 0xFF) shl 8)) / 100f
-                    val mv = (v[off + 6].toInt() and 0xFF) or ((v[off + 7].toInt() and 0xFF) shl 8)
-                    val up = (v[off + 8].toLong() and 0xFF) or
-                            ((v[off + 9].toLong() and 0xFF) shl 8) or
-                            ((v[off + 10].toLong() and 0xFF) shl 16) or
-                            ((v[off + 11].toLong() and 0xFF) shl 24)
-                    recs.add(LogRec(co2, tRaw.toShort().toInt() / 100f, hum, mv, up))
+                    fun u8(k: Int) = v[off + k].toLong() and 0xFF
+                    val ts = (u8(0) or (u8(1) shl 8) or (u8(2) shl 16) or (u8(3) shl 24))
+                    val co2 = (u8(4) or (u8(5) shl 8)).toInt()
+                    val tRaw = (u8(6) or (u8(7) shl 8)).toInt().toShort().toInt()
+                    val hum = (u8(8) or (u8(9) shl 8)).toInt() / 100f
+                    val mv = (u8(10) or (u8(11) shl 8)).toInt()
+                    recs.add(LogRec(ts, co2, tRaw / 100f, hum, mv))
                     off += 12
                 }
                 logNext += recs.size

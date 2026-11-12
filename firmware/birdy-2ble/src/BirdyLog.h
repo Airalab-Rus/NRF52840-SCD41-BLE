@@ -3,43 +3,48 @@
 #include <Arduino.h>
 
 /**
- * Лог измерений в памяти платы.
+ * Лог измерений в памяти платы: три уровня агрегации.
  *
- * Кольцевой буфер на 256 записей (по 12 байт) живёт в RAM и периодически
- * сбрасывается в файл `/birdy.log` на InternalFS (LittleFS, регион 0xED000).
- * Так flash не изнашивается: полная перезапись 3 КБ раз в 30 замеров.
+ *   RAW  — каждый замер (1 мин), 180 записей  → ~3 часа
+ *   HOUR — средние за час,        720 записей → ~30 суток
+ *   DAY  — средние за сутки,      400 записей → ~год
  *
- * Запись (12 байт, little-endian):
- *   u16 co2      — ppm
- *   i16 temp     — 0.01 °C
- *   u16 hum      — 0.01 %
- *   u16 mv       — напряжение АКБ, мВ
- *   u32 up       — секунды с загрузки (для привязки к времени на телефоне)
+ * Все уровни — кольцевые буферы в RAM, периодически сбрасываются в файлы
+ * `/log.raw`, `/log.h`, `/log.d` на InternalFS (LittleFS, регион 0xED000).
+ *
+ * Запись 12 байт (little-endian):
+ *   u32 ts   — локальное время (unix + смещение часового пояса), сек
+ *   u16 co2  — ppm
+ *   i16 temp — 0.01 °C
+ *   u16 hum  — 0.01 %
+ *   u16 mv   — напряжение АКБ, мВ
  */
-#define BIRDY_LOG_MAX 256
+#define BIRDY_LOG_RAW_MAX  180
+#define BIRDY_LOG_HOUR_MAX 720
+#define BIRDY_LOG_DAY_MAX  400
+
+enum BirdyLogTier : uint8_t { LOG_TIER_RAW = 0, LOG_TIER_HOUR = 1, LOG_TIER_DAY = 2, LOG_TIER_NUM = 3 };
 
 struct __attribute__((packed)) BirdyLogRec {
+  uint32_t ts;
   uint16_t co2;
   int16_t  temp;
   uint16_t hum;
   uint16_t mv;
-  uint32_t up;
 };
 
-/** Загрузить лог из flash (вызывать один раз после InternalFS.begin()). */
+/** Загрузить логи из flash (после InternalFS.begin()). */
 void logBegin(void);
 
-/** Добавить запись; раз в 30 штук — автосохранение в flash. */
+/** Добавить замер (внутри обновляются все три уровня). */
 bool logAppend(uint16_t co2, float tempC, float humPct, uint16_t mv);
 
-/** Количество записей в кольце (0..BIRDY_LOG_MAX). */
-uint16_t logCount(void);
+/** Установить время (unix + смещение пояса, сек). */
+void logSetEpoch(uint32_t epoch);
+uint32_t logNow(void);
+bool logTimeValid(void);
 
-/** Запись по индексу 0..count-1 (0 = самая старая). */
-bool logGet(uint16_t idx, BirdyLogRec *out);
-
-/** Очистить лог. */
+uint16_t logCount(uint8_t tier);
+bool logGet(uint8_t tier, uint16_t idx, BirdyLogRec *out);
 void logClear(void);
-
-/** Принудительно сохранить в flash. */
 void logFlush(void);

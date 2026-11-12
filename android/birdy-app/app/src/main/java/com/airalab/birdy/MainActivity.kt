@@ -487,21 +487,16 @@ fun ControlScreen(ui: Ui, vm: BirdyVm) {
 
         Spacer(Modifier.height(14.dp))
         SectionCard("История (в памяти платы)") {
-            val ref = ui.logRecs.lastOrNull()?.up ?: 0L
-            fun ago(up: Long): String {
-                val d = (ref - up).coerceAtLeast(0)
-                return when {
-                    d < 90 -> "${d} с"
-                    d < 5400 -> "${d / 60} мин"
-                    else -> "${d / 3600} ч ${(d % 3600) / 60} м"
-                }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                TierChip("3 часа", ui.logTier == 0, Modifier.weight(1f)) { vm.loadLog(0) }
+                TierChip("30 дней", ui.logTier == 1, Modifier.weight(1f)) { vm.loadLog(1) }
+                TierChip("год", ui.logTier == 2, Modifier.weight(1f)) { vm.loadLog(2) }
             }
-
+            Spacer(Modifier.height(8.dp))
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                SmallButton(
-                    if (ui.logLoading) "Загружаю…" else "Загрузить из платы",
-                    Modifier.weight(1f)
-                ) { if (!ui.logLoading) vm.loadLog() }
+                SmallButton(if (ui.logLoading) "Загружаю…" else "Загрузить", Modifier.weight(1f)) {
+                    if (!ui.logLoading) vm.loadLog(ui.logTier)
+                }
                 SmallButton("Очистить", Modifier.weight(1f)) { vm.clearLog() }
             }
             if (ui.logLoading) {
@@ -518,25 +513,32 @@ fun ControlScreen(ui: Ui, vm: BirdyVm) {
             if (ui.logRecs.isNotEmpty()) {
                 Spacer(Modifier.height(10.dp))
                 LogChart(ui.logRecs, ui.thr)
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(fmtTs(ui.logRecs.first().ts, ui.logTier), color = Color(0xFF6B7280), fontSize = 9.sp)
+                    Text(fmtTs(ui.logRecs.last().ts, ui.logTier), color = Color(0xFF6B7280), fontSize = 9.sp)
+                }
                 Spacer(Modifier.height(8.dp))
-                Text("${ui.logRecs.size} записей, последние:", color = Color(0xFF6B7280), fontSize = 11.sp)
+                Text(
+                    "${ui.logRecs.size} записей, последние:",
+                    color = Color(0xFF6B7280), fontSize = 11.sp
+                )
                 ui.logRecs.takeLast(6).asReversed().forEach { r ->
                     Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
-                        Text(ago(r.up), color = Color(0xFF98A2B3), fontSize = 11.sp,
-                             modifier = Modifier.width(64.dp))
-                        Text("${r.co2} ppm", color = Color.White, fontSize = 11.sp,
-                             modifier = Modifier.width(64.dp))
-                        Text("%.1f°C".format(r.temp), color = Color(0xFF98A2B3), fontSize = 11.sp,
-                             modifier = Modifier.width(56.dp))
-                        Text("%.0f%%".format(r.hum), color = Color(0xFF98A2B3), fontSize = 11.sp,
-                             modifier = Modifier.width(44.dp))
-                        Text("%.2f В".format(r.mv / 1000f), color = Color(0xFF98A2B3), fontSize = 11.sp)
+                        Text(fmtTs(r.ts, ui.logTier), color = Color(0xFF98A2B3), fontSize = 10.sp,
+                            modifier = Modifier.width(84.dp))
+                        Text("${r.co2}", color = Color.White, fontSize = 11.sp,
+                            modifier = Modifier.width(52.dp))
+                        Text("%.1f°C".format(r.temp), color = Color(0xFF98A2B3), fontSize = 10.sp,
+                            modifier = Modifier.width(50.dp))
+                        Text("%.0f%%".format(r.hum), color = Color(0xFF98A2B3), fontSize = 10.sp,
+                            modifier = Modifier.width(40.dp))
+                        Text("%.2fВ".format(r.mv / 1000f), color = Color(0xFF98A2B3), fontSize = 10.sp)
                     }
                 }
             } else if (!ui.logLoading) {
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "Плата хранит до 256 замеров в своей памяти (≈4 часа).",
+                    "Плата хранит: 3 часа по минутам, 30 суток по часам, год по суткам.",
                     color = Color(0xFF6B7280), fontSize = 11.sp
                 )
             }
@@ -698,9 +700,37 @@ fun BirdyGauge(pos: Int, alive: Int, dead: Int, isDead: Boolean) {
 }
 
 @Composable
+fun TierChip(text: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    OutlinedButton(
+        onClick = onClick,
+        modifier = modifier.height(38.dp),
+        shape = RoundedCornerShape(12.dp),
+        colors = ButtonDefaults.outlinedButtonColors(
+            containerColor = if (selected) Green.copy(alpha = 0.20f) else Color.Transparent
+        )
+    ) {
+        Text(
+            text,
+            fontSize = 11.sp,
+            color = if (selected) Green else Color(0xFF98A2B3),
+            maxLines = 1
+        )
+    }
+}
+
+/** Время записи: ts уже в «локальном» виде (unix + смещение пояса). */
+fun fmtTs(ts: Long, tier: Int): String {
+    if (ts <= 0L) return "--"
+    val pattern = if (tier == 2) "dd.MM.yy" else "dd.MM HH:mm"
+    val f = java.text.SimpleDateFormat(pattern, java.util.Locale.getDefault())
+    f.timeZone = java.util.TimeZone.getTimeZone("UTC")
+    return f.format(java.util.Date(ts * 1000L))
+}
+
+@Composable
 fun LogChart(recs: List<LogRec>, thr: Int) {
-    val pts = recs.takeLast(120)
-    Canvas(Modifier.fillMaxWidth().height(110.dp)) {
+    val pts = recs.takeLast(200)
+    Canvas(Modifier.fillMaxWidth().height(120.dp)) {
         val w = size.width
         val h = size.height
         val mn = 380f
@@ -709,15 +739,12 @@ fun LogChart(recs: List<LogRec>, thr: Int) {
         fun y(v: Float): Float = h - ((v - mn) / (mx - mn)).coerceIn(0f, 1f) * h
         fun x(i: Int): Float = if (pts.size <= 1) 0f else w * i / (pts.size - 1).toFloat()
 
-        // сетка
         drawLine(Line.copy(alpha = 0.6f), Offset(0f, y(600f)), Offset(w, y(600f)), strokeWidth = 1f)
         drawLine(Line.copy(alpha = 0.6f), Offset(0f, y(1000f)), Offset(w, y(1000f)), strokeWidth = 1f)
-        // порог
         drawLine(
             Amber.copy(alpha = 0.8f), Offset(0f, y(thr.toFloat())), Offset(w, y(thr.toFloat())),
             strokeWidth = 2f
         )
-        // график
         for (i in 1 until pts.size) {
             val c = if (pts[i].co2 >= thr) Red else Green
             drawLine(

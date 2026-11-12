@@ -422,6 +422,15 @@ static void handleText(char *buf) {
     else if (!strcasecmp(tok, "down")) { if (_hooks.chirp) _hooks.chirp(false); }
     else if (!strcasecmp(tok, "reset")) { birdyCtlReset(); changed = true; }
     else if (!strcasecmp(tok, "toff") && eq) { _run.toffTenths = (int16_t)v; changed = true; }
+    else if (!strcasecmp(tok, "epoch") && eq) {
+      /* epoch = unix + смещение часового пояса: и часы (ночной режим), и журнал */
+      const uint32_t e = (uint32_t)v;
+      logSetEpoch(e);
+      _clockMin = (uint16_t)((e / 60UL) % 1440UL);
+      _clockSetMs = millis();
+      _clockSet = true;
+      changed = true;
+    }
     else if (!strcasecmp(tok, "vol") && eq) { _run.volume = (uint8_t)v; changed = true; }
     else if (!strcasecmp(tok, "night") && eq) { _run.nightEnabled = v ? 1 : 0; changed = true; }
     else if (!strcasecmp(tok, "nfrom") && eq) { _run.nightFrom = (uint8_t)v; changed = true; }
@@ -488,45 +497,50 @@ static void onPeerDisconnect(uint16_t conn_hdl, uint8_t reason) {
 }
 
 /* ----------------------------- Журнал измерений (0xFFF6) -----------------------------
- * write 0x01                 -> notify [01, count_lo, count_hi, 0]
- * write [02, idx_lo, idx_hi] -> notify [02, idx_lo, idx_hi, n, записи...]
- * write 0x03                 -> очистить журнал
+ * write [01, tier]              -> notify [01, tier, count_lo, count_hi]
+ * write [02, tier, idx_lo, hi]  -> notify [02, tier, idx_lo, idx_hi, n, записи...]
+ * write [03]                    -> очистить все уровни
+ * tier: 0 = сырые (мин), 1 = часовые средние, 2 = суточные средние
  */
 static void onLogWrite(uint16_t conn_hdl, BLECharacteristic *chr, uint8_t *data, uint16_t len) {
   (void)chr;
   if (len < 1) return;
 
-  uint8_t pkt[4 + 20 * sizeof(BirdyLogRec)];
+  uint8_t pkt[6 + 20 * sizeof(BirdyLogRec)];
   uint16_t out = 0;
-  const uint16_t total = logCount();
 
-  if (data[0] == 0x01) {
+  if (data[0] == 0x01 && len >= 2) {
+    const uint16_t total = logCount(data[1]);
     pkt[0] = 0x01;
-    pkt[1] = (uint8_t)(total & 0xFF);
-    pkt[2] = (uint8_t)(total >> 8);
-    pkt[3] = 0;
+    pkt[1] = data[1];
+    pkt[2] = (uint8_t)(total & 0xFF);
+    pkt[3] = (uint8_t)(total >> 8);
     out = 4;
-  } else if (data[0] == 0x02 && len >= 3) {
-    const uint16_t idx = (uint16_t)data[1] | ((uint16_t)data[2] << 8);
+  } else if (data[0] == 0x02 && len >= 4) {
+    const uint8_t tier = data[1];
+    const uint16_t idx = (uint16_t)data[2] | ((uint16_t)data[3] << 8);
+    const uint16_t total = logCount(tier);
 
     uint16_t mtu = 23;
     BLEConnection *conn = Bluefruit.Connection(conn_hdl);
     if (conn != nullptr && conn->getMtu() > 23) mtu = conn->getMtu();
-    uint16_t maxRecs = (uint16_t)((mtu > 8) ? ((mtu - 8) / sizeof(BirdyLogRec)) : 1);
+    uint16_t maxRecs = (uint16_t)((mtu > 10) ? ((mtu - 10) / sizeof(BirdyLogRec)) : 1);
     if (maxRecs < 1) maxRecs = 1;
     if (maxRecs > 20) maxRecs = 20;
 
     uint16_t cnt = 0;
     for (uint16_t i = idx; i < total && cnt < maxRecs; i++, cnt++) {
       BirdyLogRec r;
-      if (!logGet(i, &r)) break;
-      memcpy(pkt + 4 + cnt * sizeof(BirdyLogRec), &r, sizeof(r));
+      if (!logGet(tier, i, &r)) break;
+      memcpy(pkt + 6 + cnt * sizeof(BirdyLogRec), &r, sizeof(r));
     }
     pkt[0] = 0x02;
-    pkt[1] = (uint8_t)(idx & 0xFF);
-    pkt[2] = (uint8_t)(idx >> 8);
-    pkt[3] = (uint8_t)cnt;
-    out = (uint16_t)(4 + cnt * sizeof(BirdyLogRec));
+    pkt[1] = tier;
+    pkt[2] = (uint8_t)(idx & 0xFF);
+    pkt[3] = (uint8_t)(idx >> 8);
+    pkt[4] = (uint8_t)cnt;
+    pkt[5] = 0;
+    out = (uint16_t)(6 + cnt * sizeof(BirdyLogRec));
   } else if (data[0] == 0x03) {
     logClear();
     pkt[0] = 0x03; pkt[1] = 0; pkt[2] = 0; pkt[3] = 0;
