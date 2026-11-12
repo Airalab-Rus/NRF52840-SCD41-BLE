@@ -21,6 +21,11 @@ struct Tier {
   uint8_t flushEvery; /* как часто сбрасывать */
 };
 
+/* «Страховка»: если приложение падает на старте из-за лога, после 2 сбросов
+ * подряд журнал отключается, и плата грузится с пустым логом.
+ * GPREGRET переживает программный сброс, но обнуляется при отключении питания. */
+static bool _enabled = true;
+
 static BirdyLogRec _raw[BIRDY_LOG_RAW_MAX];
 static BirdyLogRec _hour[BIRDY_LOG_HOUR_MAX];
 static BirdyLogRec _day[BIRDY_LOG_DAY_MAX];
@@ -76,11 +81,20 @@ static void saveTier(Tier &t) {
     return;
   }
   f.seek(0);
-  f.write((const uint8_t *)&t.h, sizeof(t.h));
+  int wr = (int)f.write((const uint8_t *)&t.h, sizeof(t.h));
+  if (wr != (int)sizeof(t.h)) {
+    Serial.printf("[log] %s: ошибка записи заголовка (%d)\n", t.path, wr);
+    f.close();
+    return;
+  }
   for (uint16_t i = 0; i < t.h.count; i++) {
     BirdyLogRec r;
     if (!getRec(t, i, &r)) break;
-    f.write((const uint8_t *)&r, sizeof(r));
+    wr = (int)f.write((const uint8_t *)&r, sizeof(r));
+    if (wr != (int)sizeof(r)) {
+      Serial.printf("[log] %s: ошибка на записи %u (%d)\n", t.path, i, wr);
+      break;
+    }
   }
   f.close();
   t.dirty = 0;
@@ -113,6 +127,24 @@ static void loadTier(Tier &t) {
 /* --------------------------------- API --------------------------------- */
 
 void logBegin(void) {
+  const uint32_t gr = NRF_POWER->GPREGRET;
+  if (gr >= 2) {
+    _enabled = false;
+    Serial.printf("[log] SAFE MODE: журнал отключён (сбросов подряд: %lu)\n",
+                  (unsigned long)gr);
+    return;
+  }
+  NRF_POWER->GPREGRET = gr + 1;
+
+  /* файл прошлой версии формата — удаляем, чтобы не занимал блоки */
+  {
+    File old(InternalFS);
+    if (old.open("/birdy.log", FILE_O_READ)) {
+      old.close();
+      InternalFS.remove("/birdy.log");
+      Serial.println("[log] старый /birdy.log удалён");
+    }
+  }
   for (uint8_t i = 0; i < LOG_TIER_NUM; i++) loadTier(_tiers[i]);
 }
 
@@ -122,6 +154,7 @@ static uint32_t hCo2 = 0, hHum = 0, hMv = 0; static int32_t hTemp = 0; static ui
 static uint32_t dCo2 = 0, dHum = 0, dMv = 0; static int32_t dTemp = 0; static uint16_t dN = 0;
 
 bool logAppend(uint16_t co2, float tempC, float humPct, uint16_t mv) {
+  if (!_enabled) return false;
   const uint32_t now = logNow();
 
   BirdyLogRec r;
@@ -172,16 +205,22 @@ bool logAppend(uint16_t co2, float tempC, float humPct, uint16_t mv) {
 }
 
 uint16_t logCount(uint8_t tier) {
-  if (tier >= LOG_TIER_NUM) return 0;
+  if (!_enabled || tier >= LOG_TIER_NUM) return 0;
   return _tiers[tier].h.count;
 }
 
 bool logGet(uint8_t tier, uint16_t idx, BirdyLogRec *out) {
-  if (tier >= LOG_TIER_NUM) return false;
+  if (!_enabled || tier >= LOG_TIER_NUM) return false;
   return getRec(_tiers[tier], idx, out);
 }
 
+void logMarkAlive(void) {
+  /* дошли до рабочего цикла — счётчик «страховки» больше не нужен */
+  NRF_POWER->GPREGRET = 0;
+}
+
 void logClear(void) {
+  if (!_enabled) return;
   for (uint8_t i = 0; i < LOG_TIER_NUM; i++) {
     _tiers[i].h.head = 0;
     _tiers[i].h.count = 0;

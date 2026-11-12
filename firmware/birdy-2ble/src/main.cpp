@@ -498,6 +498,7 @@ void loop() {
 #endif
 		updateBirdState(co2, got);
 		birdyCtlOpenWindow(BIRDY_ADV_WINDOW_SEC);
+		if (got) logMarkAlive(); /* цикл работает — снимаем метку «страховки» */
 	}
 
 	birdyServo.tick();
