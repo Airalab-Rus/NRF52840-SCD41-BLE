@@ -510,6 +510,14 @@ fun ControlScreen(ui: Ui, vm: BirdyVm) {
                 Spacer(Modifier.height(6.dp))
                 Text(ui.logError, color = Red, fontSize = 11.sp)
             }
+            if (ui.history.isNotEmpty()) {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "В телефоне: ${ui.history.size} записей, с ${fmtTs(ui.history.first().ts, 2)}",
+                    color = Color(0xFF98A2B3), fontSize = 11.sp
+                )
+                LogChart(ui.history, ui.thr)
+            }
             if (ui.logRecs.isNotEmpty()) {
                 Spacer(Modifier.height(10.dp))
                 LogChart(ui.logRecs, ui.thr)

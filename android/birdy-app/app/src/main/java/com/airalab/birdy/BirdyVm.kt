@@ -74,6 +74,7 @@ data class Ui(
     /* --- журнал с платы --- */
     val logTier: Int = 1,          /* 0 = 3 часа, 1 = 30 суток, 2 = год */
     val logRecs: List<LogRec> = emptyList(),
+    val history: List<LogRec> = emptyList(),   /* накоплено в телефоне (по MAC) */
     val logLoading: Boolean = false,
     val logProgress: Int = 0,
     val logError: String? = null,
@@ -179,6 +180,10 @@ class BirdyVm(app: Application) : AndroidViewModel(app) {
             _ui.update { it.copy(connected = true, connecting = false, error = null) }
             ble.readInfo()
             startRssiPolling()
+            lastAddress?.let { mac ->
+                val saved = HistoryStore.load(getApplication(), mac)
+                _ui.update { it.copy(history = saved) }
+            }
             /* Часы платы синхронизируем с телефоном (для ночного режима). */
             ble.send("time=" + java.time.LocalTime.now()
                 .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm")))
@@ -484,7 +489,8 @@ class BirdyVm(app: Application) : AndroidViewModel(app) {
 
     fun clearLog() {
         ble.logRequest(byteArrayOf(0x03))
-        _ui.update { it.copy(logRecs = emptyList(), logProgress = 100, logError = null) }
+        lastAddress?.let { HistoryStore.clear(getApplication(), it) }
+        _ui.update { it.copy(logRecs = emptyList(), history = emptyList(), logProgress = 100, logError = null) }
     }
 
     private fun requestChunk() {
@@ -537,8 +543,15 @@ class BirdyVm(app: Application) : AndroidViewModel(app) {
                         logProgress = if (logTotal > 0) logNext * 100 / logTotal else 0
                     )
                 }
-                if (logNext < logTotal) requestChunk()
-                else _ui.update { it.copy(logLoading = false, logProgress = 100) }
+                if (logNext < logTotal) {
+                    requestChunk()
+                } else {
+                    val mac = lastAddress
+                    val merged = if (mac != null) {
+                        HistoryStore.append(getApplication(), mac, _ui.value.logRecs)
+                    } else _ui.value.logRecs
+                    _ui.update { it.copy(logLoading = false, logProgress = 100, history = merged) }
+                }
             }
         }
     }
