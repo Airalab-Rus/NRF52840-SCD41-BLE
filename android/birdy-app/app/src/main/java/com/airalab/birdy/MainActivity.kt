@@ -51,6 +51,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
@@ -256,7 +257,7 @@ fun ControlScreen(ui: Ui, vm: BirdyVm) {
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    if (ui.dead) "ПТИЧКА МЁРТВА" else "ПТИЧКА ЖИВА",
+                    if (ui.dead) "ТРЕВОГА" else "НОРМА",
                     color = if (ui.dead) Red else Green,
                     fontSize = 18.sp, fontWeight = FontWeight.Bold
                 )
@@ -294,7 +295,7 @@ fun ControlScreen(ui: Ui, vm: BirdyVm) {
         Spacer(Modifier.height(14.dp))
         SectionCard("Пороги") {
             ParamRow(
-                title = "Порог CO₂ (птичка умирает)",
+                title = "Порог CO₂ (тревога)",
                 value = ui.thr, unit = "ppm", range = 300..3000, step = 50
             ) { v -> vm.setThr(v) }
             ParamRow(
@@ -304,7 +305,7 @@ fun ControlScreen(ui: Ui, vm: BirdyVm) {
         }
 
         Spacer(Modifier.height(14.dp))
-        SectionCard("Положение птички") {
+        SectionCard("Положение серво") {
             ParamRow(
                 title = "Угол ЖИВА",
                 value = ui.alive, unit = "%", range = -100..100, step = 1,
@@ -737,30 +738,90 @@ fun fmtTs(ts: Long, tier: Int): String {
 
 @Composable
 fun LogChart(recs: List<LogRec>, thr: Int) {
-    val pts = recs.takeLast(200)
-    Canvas(Modifier.fillMaxWidth().height(120.dp)) {
-        val w = size.width
-        val h = size.height
-        val mn = 380f
-        val mx = maxOf(2000f, pts.maxOfOrNull { it.co2.toFloat() } ?: 2000f)
+    val pts = recs.takeLast(300)
+    if (pts.isEmpty()) return
 
-        fun y(v: Float): Float = h - ((v - mn) / (mx - mn)).coerceIn(0f, 1f) * h
-        fun x(i: Int): Float = if (pts.size <= 1) 0f else w * i / (pts.size - 1).toFloat()
+    Canvas(Modifier.fillMaxWidth().height(165.dp)) {
+        val padLeft = 44.dp.toPx()
+        val padRight = 6.dp.toPx()
+        val padBottom = 14.dp.toPx()
+        val plotW = size.width - padLeft - padRight
+        val plotH = size.height - padBottom
 
-        drawLine(Line.copy(alpha = 0.6f), Offset(0f, y(600f)), Offset(w, y(600f)), strokeWidth = 1f)
-        drawLine(Line.copy(alpha = 0.6f), Offset(0f, y(1000f)), Offset(w, y(1000f)), strokeWidth = 1f)
-        drawLine(
-            Amber.copy(alpha = 0.8f), Offset(0f, y(thr.toFloat())), Offset(w, y(thr.toFloat())),
-            strokeWidth = 2f
-        )
-        for (i in 1 until pts.size) {
-            val c = if (pts[i].co2 >= thr) Red else Green
+        val mn = 400f
+        var mx = 1000f
+        for (r in pts) if (r.co2 > mx) mx = r.co2.toFloat()
+        mx = maxOf(mx, thr.toFloat(), 800f)
+        mx = ((mx + 199f) / 200f) * 200f /* вверх до 200 ppm */
+
+        fun x(i: Int): Float =
+            padLeft + plotW * i / (pts.size - 1).coerceAtLeast(1)
+        fun y(v: Float): Float =
+            plotH - ((v - mn) / (mx - mn)).coerceIn(0f, 1f) * plotH
+
+        val paint = android.graphics.Paint().apply {
+            isAntiAlias = true
+            color = android.graphics.Color.parseColor("#7A8699")
+            textSize = 9.sp.toPx()
+        }
+        val nc = drawContext.canvas.nativeCanvas
+
+        /* --- горизонтальная сетка + шкала ppm --- */
+        val step = if (mx - mn <= 900f) 200f else 400f
+        var v = mn
+        while (v <= mx + 1f) {
+            val yy = y(v)
             drawLine(
-                c,
+                Line.copy(alpha = 0.45f), Offset(padLeft, yy),
+                Offset(size.width - padRight, yy), strokeWidth = 1f
+            )
+            nc.drawText(v.toInt().toString(), 2f, yy + 3.sp.toPx(), paint)
+            v += step
+        }
+
+        /* --- вертикальная сетка + время --- */
+        val cols = 4
+        for (k in 0..cols) {
+            val idx = (pts.size - 1) * k / cols
+            val xx = x(idx)
+            drawLine(
+                Line.copy(alpha = 0.45f), Offset(xx, 0f),
+                Offset(xx, plotH), strokeWidth = 1f
+            )
+            val txt = fmtTsShort(pts[idx].ts, pts.first().ts, pts.last().ts)
+            val tw = paint.measureText(txt)
+            val tx = (xx - tw / 2f).coerceIn(padLeft, size.width - tw - 1f)
+            nc.drawText(txt, tx, size.height - 3.sp.toPx(), paint)
+        }
+
+        /* --- порог --- */
+        drawLine(
+            Amber, Offset(padLeft, y(thr.toFloat())),
+            Offset(size.width - padRight, y(thr.toFloat())), strokeWidth = 2f
+        )
+
+        /* --- данные --- */
+        for (i in 1 until pts.size) {
+            drawLine(
+                if (pts[i].co2 >= thr) Red else Green,
                 Offset(x(i - 1), y(pts[i - 1].co2.toFloat())),
                 Offset(x(i), y(pts[i].co2.toFloat())),
                 strokeWidth = 2.5f
             )
         }
     }
+}
+
+/** Компактная метка времени: формат зависит от длительности интервала. */
+fun fmtTsShort(ts: Long, first: Long, last: Long): String {
+    if (ts <= 0L) return "--"
+    val span = last - first
+    val pattern = when {
+        span > 3L * 86400L -> "dd.MM"
+        span > 86400L -> "dd.MM HH:mm"
+        else -> "HH:mm"
+    }
+    val f = java.text.SimpleDateFormat(pattern, java.util.Locale.getDefault())
+    f.timeZone = java.util.TimeZone.getTimeZone("UTC")
+    return f.format(java.util.Date(ts * 1000L))
 }
