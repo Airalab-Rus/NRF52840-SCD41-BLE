@@ -71,6 +71,8 @@ struct BirdyHooks {
   void (*sweep)(void);                /* свип серво (тест) */
   void (*moveTo)(int percent);        /* сразу поставить серво в положение % */
   void (*enterDfu)(void);             /* переход в DFU-бутлоадер (OTA) */
+  void (*toneTest)(uint16_t hz);      /* тест-тон 50 % duty, 0 = выключить */
+  void (*sweepTest)(void);            /* свип 2.0..4.5 кГц */
 };
 
 void birdyCtlBegin(const BirdyHooks &hooks);

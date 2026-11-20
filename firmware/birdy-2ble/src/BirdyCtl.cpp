@@ -448,6 +448,9 @@ static void handleText(char *buf) {
       }
     }
     else if (!strcasecmp(tok, "dfu")) { if (_hooks.enterDfu) _hooks.enterDfu(); }
+    else if (!strcasecmp(tok, "tone") && eq) { if (_hooks.toneTest) _hooks.toneTest((uint16_t)v); }
+    else if (!strcasecmp(tok, "sweepf")) { if (_hooks.sweepTest) _hooks.sweepTest(); }
+    else if (!strcasecmp(tok, "testoff")) { if (_hooks.toneTest) _hooks.toneTest(0); }
     else {
       ok = false;
     }

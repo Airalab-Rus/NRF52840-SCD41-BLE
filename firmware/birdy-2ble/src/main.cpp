@@ -100,6 +100,19 @@ static void hookChirp(bool up) {
 	g_pendingChirp = up ? 1 : 2;
 }
 
+/* Тест-тон для подбора резонанса пьезо (50 % duty). */
+static void hookTone(uint16_t hz) {
+	if (hz == 0) {
+		birdyPiezo.stopTest();
+	} else {
+		birdyPiezo.startTone(hz, 60000); /* минута — чтобы успеть послушать */
+	}
+}
+
+static void hookSweepTest(void) {
+	birdyPiezo.startSweep(2000, 4500, 8000); /* 8 с: 2.0 -> 4.5 кГц */
+}
+
 static void hookSweep(void) {
 	g_pendingSweep = true; /* плавный тест ~12 с — выполняем в loop(), не в BLE-потоке */
 }
@@ -209,6 +222,8 @@ void setup() {
 	hooks.sweep = hookSweep;
 	hooks.moveTo = hookMoveTo;
 	hooks.enterDfu = hookDfu;
+	hooks.toneTest = hookTone;
+	hooks.sweepTest = hookSweepTest;
 	birdyCtlBegin(hooks);
 
 	/* Журнал измерений (RAM + flash). */

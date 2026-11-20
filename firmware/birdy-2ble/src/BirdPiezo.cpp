@@ -201,6 +201,37 @@ void BirdPiezo::setVolume(uint8_t pct) {
   Serial.printf("[birdy] громкость трели = %u %%\n", (unsigned)_volPct);
 }
 
+void BirdPiezo::startTone(uint16_t freqHz, uint32_t durationMs) {
+  if (!_ready) return;
+  if (freqHz == 0) { stopTest(); return; }
+  _playing = false;
+  _testF0 = freqHz;
+  _testF1 = 0;
+  _testStartMs = millis();
+  _testEndMs = _testStartMs + durationMs;
+  _testActive = true;
+  Serial.printf("[piezo] tone %u Hz, 50%% duty\n", (unsigned)freqHz);
+}
+
+void BirdPiezo::startSweep(uint16_t f0, uint16_t f1, uint32_t durationMs) {
+  if (!_ready) return;
+  _playing = false;
+  _testF0 = f0;
+  _testF1 = f1;
+  _testStartMs = millis();
+  _testEndMs = _testStartMs + durationMs;
+  _testActive = true;
+  Serial.printf("[piezo] sweep %u..%u Hz\n", (unsigned)f0, (unsigned)f1);
+}
+
+void BirdPiezo::stopTest(void) {
+  if (_testActive) {
+    _testActive = false;
+    if (_ready) toneOut(0, 0);
+    Serial.println("[piezo] test off");
+  }
+}
+
 void BirdPiezo::stop() {
   if (_ready) toneOut(0, 0);
   _playing = false;
@@ -239,6 +270,29 @@ void BirdPiezo::playChirp(bool goingUp, uint8_t family, uint8_t variant) {
 }
 
 void BirdPiezo::tick() {
+  /* тестовый тон/свип имеет приоритет над трелью */
+  if (_testActive) {
+    const uint32_t now = millis();
+    if (now >= _testEndMs) {
+      _testActive = false;
+      toneOut(0, 0);
+      Serial.println("[piezo] test finished");
+      return;
+    }
+    uint16_t f = _testF0;
+    if (_testF1 > _testF0) {
+      const uint32_t total = _testEndMs - _testStartMs;
+      const uint32_t el = now - _testStartMs;
+      f = (uint16_t)(_testF0 + (uint32_t)(_testF1 - _testF0) * el / (total ? total : 1));
+    }
+    static uint16_t lastLogged = 0;
+    if ((uint16_t)(f / 100) != (uint16_t)(lastLogged / 100)) {
+      lastLogged = f;
+      Serial.printf("[piezo] f=%u Hz\n", (unsigned)f);
+    }
+    toneOut(f, 50);
+    return;
+  }
   if (!_playing || _seq == nullptr || _seqCount == 0) return;
   if (_noteIdx >= _seqCount) { stop(); return; } /* защита от гонки/мусора */
   const uint32_t now = millis();

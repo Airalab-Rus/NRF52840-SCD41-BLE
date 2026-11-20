@@ -31,10 +31,18 @@ public:
   void playChirp(bool goingUp, uint8_t family, uint8_t variant = 0);
   /** Громкость 0..100 % (масштабирует скважность PWM). */
   void setVolume(uint8_t pct);
+
+  /* --- тестовые режимы для подбора резонанса (50 % duty) --- */
+  void startTone(uint16_t freqHz, uint32_t durationMs = 60000);
+  void startSweep(uint16_t f0, uint16_t f1, uint32_t durationMs = 8000);
+  void stopTest(void);
   void stop();
   bool isPlaying() const { return _playing; }
 
 private:
+  bool _testActive = false;
+  uint32_t _testStartMs = 0, _testEndMs = 0;
+  uint16_t _testF0 = 0, _testF1 = 0;
   uint8_t _volPct = 70; /* громкость, % (из настроек) */
   bool _ready;
   bool _playing;
