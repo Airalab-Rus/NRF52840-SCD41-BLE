@@ -218,6 +218,12 @@ fun ScanScreen(ui: Ui, vm: BirdyVm, onGrant: () -> Unit) {
         TextButton(onClick = { vm.startScan() }, modifier = Modifier.fillMaxWidth()) {
             Text("Обновить поиск", color = Blue)
         }
+        Text(
+            "v${BuildConfig.VERSION_NAME}",
+            color = Color(0xFF3A4250), fontSize = 10.sp,
+            modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+            textAlign = TextAlign.Center
+        )
     }
 }
 
@@ -234,7 +240,7 @@ fun ControlScreen(ui: Ui, vm: BirdyVm) {
             Column(Modifier.weight(1f)) {
                 Text("CO2-Birdy", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                 Text(
-                    "подключено · RSSI ${ui.rssi} dBm",
+                    "подключено · RSSI ${ui.rssi} dBm · v${BuildConfig.VERSION_NAME}",
                     color = Color(0xFF98A2B3), fontSize = 12.sp
                 )
             }

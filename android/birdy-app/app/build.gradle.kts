@@ -13,8 +13,8 @@ android {
         /* 33: библиотека DFU 2.6.0 стартует foreground-сервис без типа,
            на targetSdk 34 Android 14 роняет процесс (MissingForegroundServiceTypeException). */
         targetSdk = 33
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 5
+        versionName = "1.5"
     }
 
     buildTypes {
@@ -31,6 +31,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
     composeOptions {
         kotlinCompilerExtensionVersion = "1.5.3"
