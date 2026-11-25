@@ -19,7 +19,11 @@
 #define BIRDY_SERVO_PIN 24 /* P0.24 — серво (свободный GPIO) */
 #endif
 #ifndef BIRDY_PIEZO_PIN
-#define BIRDY_PIEZO_PIN 22 /* P0.22 — пьезо (свободный GPIO) */
+#define BIRDY_PIEZO_PIN 106 /* P1.06 — пьезо, вывод A (противофазный режим) */
+#endif
+/* Второй вывод пьезо (противофаза, +6 дБ). 0xFF = обычное включение на GND. */
+#ifndef BIRDY_PIEZO_PIN2
+#define BIRDY_PIEZO_PIN2 104 /* P1.04 — пьезо, вывод B */
 #endif
 #ifndef BIRDY_CO2_BAD
 #define BIRDY_CO2_BAD 1200U

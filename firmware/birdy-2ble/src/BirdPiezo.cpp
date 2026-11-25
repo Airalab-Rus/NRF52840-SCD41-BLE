@@ -106,7 +106,8 @@ static_assert(sizeof(kDownProfiles) / sizeof(kDownProfiles[0]) == BIRDY_CHIRP_FA
 void BirdPiezo::toneOut(uint16_t freqHz, uint8_t dutyPct) {
   if (!_ready || _pwm == nullptr) return;
   if (freqHz == 0 || dutyPct == 0) {
-    _pwm->writePin(BIRDY_PIEZO_PIN, 0); /* скважность 0 = тишина */
+    _pwm->writePin(BIRDY_PIEZO_PIN, 0, false); /* скважность 0 = тишина */
+    if (BIRDY_PIEZO_PIN2 != 0xFF) _pwm->writePin(BIRDY_PIEZO_PIN2, 0, false);
     return;
   }
   /* 16 МГц / freq -> COUNTERTOP; для 2.4-4 кГц это 4000..6600 тиков (15 бит ОК). */
@@ -119,7 +120,10 @@ void BirdPiezo::toneOut(uint16_t freqHz, uint8_t dutyPct) {
   if (duty >= top) duty = top - 1;
 
   _pwm->setMaxValue((uint16_t)top);
-  _pwm->writePin(BIRDY_PIEZO_PIN, (uint16_t)duty);
+  /* противофаза: на втором выводе та же скважность, но инвертированная —
+   * на пьезо получается размах ±3.3 В вместо 0…3.3 В (+6 дБ) */
+  _pwm->writePin(BIRDY_PIEZO_PIN, (uint16_t)duty, false);
+  if (BIRDY_PIEZO_PIN2 != 0xFF) _pwm->writePin(BIRDY_PIEZO_PIN2, (uint16_t)duty, true);
 }
 
 /* -------------------------------- Огибающая -------------------------------- */
@@ -178,8 +182,11 @@ void BirdPiezo::begin() {
   for (int pass = 0; pass < 2 && _pwm == nullptr; pass++) {
     for (int i = 0; i < HWPWM_MODULE_NUM; i++) {
       if (pass == 0 && i == 0) continue;
-      if (HwPWMx[i]->takeOwnership(PIEZO_TOKEN) && HwPWMx[i]->addPin(BIRDY_PIEZO_PIN)) {
-        _pwm = HwPWMx[i];
+      HardwarePWM *m = HwPWMx[i];
+      const bool twoPins = (BIRDY_PIEZO_PIN2 != 0xFF);
+      if (m->takeOwnership(PIEZO_TOKEN) && m->addPin(BIRDY_PIEZO_PIN) &&
+          (!twoPins || m->addPin(BIRDY_PIEZO_PIN2))) {
+        _pwm = m;
         break;
       }
     }
@@ -190,7 +197,8 @@ void BirdPiezo::begin() {
   }
   _pwm->setClockDiv(PWM_PRESCALER_PRESCALER_DIV_1); /* 16 МГц -> 1 тик = 62.5 нс */
   _pwm->setMaxValue(4000);
-  _pwm->writePin(BIRDY_PIEZO_PIN, 0);
+  _pwm->writePin(BIRDY_PIEZO_PIN, 0, false);
+  if (BIRDY_PIEZO_PIN2 != 0xFF) _pwm->writePin(BIRDY_PIEZO_PIN2, 0, false);
   _ready = true;
   Serial.printf("[birdy] piezo begin: pin=%d (HardwarePWM)\n", (int)BIRDY_PIEZO_PIN);
 }
