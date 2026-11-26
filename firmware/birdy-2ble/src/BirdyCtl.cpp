@@ -1,6 +1,7 @@
 #include "BirdyCtl.h"
 #include "BirdConfig.h"
 #include "BirdyLog.h"
+#include "build_stamp.h"
 #include <bluefruit.h>
 #include <strings.h>
 #include <Adafruit_LittleFS.h>
@@ -378,12 +379,13 @@ static void fmtStatusText(char *buf, size_t n) {
   const uint16_t mins = birdyCtlClockMinutes();
   snprintf(buf, n,
            "thr=%u hyst=%u alive=%d dead=%d sec=%u snd=%u co2=%u deadstate=%u bat=%umv "
-           "toff=%d vol=%u night=%u nfrom=%u nto=%u clock=%s time=%02u:%02u",
+           "toff=%d vol=%u night=%u nfrom=%u nto=%u clock=%s time=%02u:%02u build=%s",
            _run.co2Bad, _run.hystPpm, (int)_run.angleAlive, (int)_run.angleDead,
            _run.transitionSec, _run.soundEnabled, _lastCo2, _dead ? 1 : 0, _lastMv,
            (int)_run.toffTenths, _run.volume, _run.nightEnabled, _run.nightFrom, _run.nightTo,
            (mins == 0xFFFF) ? "no" : "ok",
-           (mins == 0xFFFF) ? 0 : mins / 60, (mins == 0xFFFF) ? 0 : mins % 60);
+           (mins == 0xFFFF) ? 0 : mins / 60, (mins == 0xFFFF) ? 0 : mins % 60,
+           BIRDY_BUILD);
 }
 
 static void onTxtWrite(uint16_t conn_hdl, BLECharacteristic *chr, uint8_t *data, uint16_t len) {
@@ -469,8 +471,8 @@ static void handleText(char *buf) {
     updateInfo(); /* FFF3 сразу показывает новые значения */
   }
 
-  char st[96];
-  char answer[112];
+  char st[160];
+  char answer[176];
   fmtStatusText(st, sizeof(st));
   snprintf(answer, sizeof(answer), "%s %s", ok ? "ok" : "err", st);
   birdyCtlText(answer);

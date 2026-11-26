@@ -25,6 +25,7 @@
 #include "BirdyCtl.h"
 #include "battery.h"
 #include "BirdyLog.h"
+#include "build_stamp.h"
 
 #define MY_SDA_PIN 17               /* P0.17 — SDA SCD41 */
 #define MY_SCL_PIN 20               /* P0.20 — SCL SCD41 */
@@ -205,7 +206,7 @@ void updateBirdState(uint16_t co2ppm, bool valid) {
 void setup() {
 	Serial.begin(115200);
 	delay(500);
-	Serial.println("=== CO2-Birdy 2BLE boot ===");
+	Serial.printf("=== CO2-Birdy 2BLE boot, build %s ===\n", BIRDY_BUILD);
 
 	/* BLE: BTHome-реклама (connectable) + 2 подключения. */
 	bthome.begin(DEVICE_NAME, false, "", false);

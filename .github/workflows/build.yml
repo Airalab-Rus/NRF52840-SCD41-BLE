@@ -40,10 +40,14 @@ jobs:
             ${{ matrix.project }}/.pio/build/nicenano/firmware.elf \
             firmware.uf2
 
+      - name: Build stamp
+        id: stamp
+        run: echo "BUILD_STAMP=$(date -u +%Y-%m-%dT%H:%M)" >> $GITHUB_OUTPUT
+
       - name: Upload firmware (artifact)
         uses: actions/upload-artifact@v4
         with:
-          name: firmware-${{ strategy.job-index }}
+          name: firmware-${{ strategy.job-index }}-${{ steps.stamp.outputs.BUILD_STAMP }}
           path: |
             firmware.uf2
             ${{ matrix.project }}/.pio/build/nicenano/firmware.elf

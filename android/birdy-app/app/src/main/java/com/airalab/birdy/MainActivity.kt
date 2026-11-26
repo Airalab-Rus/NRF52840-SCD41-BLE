@@ -441,7 +441,9 @@ fun ControlScreen(ui: Ui, vm: BirdyVm) {
         Spacer(Modifier.height(14.dp))
         SectionCard("Прошивка (OTA)") {
             Text(
-                "На плате: конфиг v${ui.fwVer}" + if (ui.supportsNight) " (актуальная)" else " — устарела",
+                "На плате: конфиг v${ui.fwVer}" +
+                    (if (ui.fwBuild.isNotBlank()) ", сборка ${ui.fwBuild}" else "") +
+                    if (ui.supportsNight) " (актуальная)" else " — устарела",
                 color = if (ui.supportsNight) Color(0xFF6B7280) else Amber,
                 fontSize = 11.sp
             )

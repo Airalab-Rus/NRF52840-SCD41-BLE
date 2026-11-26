@@ -57,6 +57,7 @@ data class Ui(
     val clockOk: Boolean = false, /* часы синхронизированы */
     val nightNow: Boolean = false, /* сейчас внутри ночного периода */
     val fwVer: Int = 0,           /* версия конфига прошивки (INFO[0]) */
+    val fwBuild: String = "",     /* дата сборки прошивки платы */
     val supportsNight: Boolean = false, /* прошивка умеет громкость/ночь (INFO >= 20) */
     val rssi: Int = 0,
     val servo: Int = 0,
@@ -647,6 +648,7 @@ class BirdyVm(app: Application) : AndroidViewModel(app) {
                 nightFrom = map["nfrom"]?.toIntOrNull() ?: s.nightFrom,
                 nightTo = map["nto"]?.toIntOrNull() ?: s.nightTo,
                 clockOk = map["clock"]?.let { it == "ok" } ?: s.clockOk,
+                fwBuild = map["build"]?.replace("T", " ") ?: s.fwBuild,
             )
         }
     }
