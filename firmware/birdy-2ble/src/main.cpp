@@ -198,7 +198,7 @@ void updateBirdState(uint16_t co2ppm, bool valid) {
 		}
 	}
 
-	birdyCtlReport(co2ppm, valid, birdDead, vbatMv);
+	birdyCtlReport(co2ppm, valid, birdDead, vbatMv, temp, hum);
 }
 
 /* ================================== setup ================================== */

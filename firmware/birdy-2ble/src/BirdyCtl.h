@@ -79,7 +79,8 @@ void birdyCtlBegin(const BirdyHooks &hooks);
 BirdyRuntime &birdyRun(void);
 
 /** Вызывать после каждого замера: обновляет status/info (vbatMv — напряжение АКБ). */
-void birdyCtlReport(uint16_t co2ppm, bool sensorOk, bool dead, uint16_t vbatMv = 0);
+void birdyCtlReport(uint16_t co2ppm, bool sensorOk, bool dead, uint16_t vbatMv = 0,
+                    float tempC = 0.0f, float humPct = 0.0f);
 
 /** Забрать флаг «сделать замер сейчас» (однократный). */
 bool birdyCtlTakeForceMeasure(void);

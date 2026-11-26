@@ -60,6 +60,8 @@ data class Ui(
     val supportsNight: Boolean = false, /* прошивка умеет громкость/ночь (INFO >= 20) */
     val rssi: Int = 0,
     val servo: Int = 0,
+    val tempC: Float = 0f,     /* температура с датчика */
+    val humPct: Float = 0f,    /* влажность с датчика */
     val answer: String = "",
     val error: String? = null,
     /* --- OTA DFU --- */
@@ -599,6 +601,13 @@ class BirdyVm(app: Application) : AndroidViewModel(app) {
         val nto = if (v.size >= 20) v[19].toInt() and 0xFF else 8
         val fwVer = v[0].toInt() and 0xFF
         val supports = v.size >= 20
+        /* 24 байта: [20..21] температура 0.01°, [22..23] влажность 0.01% */
+        val tempC = if (v.size >= 24) {
+            (((v[20].toInt() and 0xFF) or ((v[21].toInt() and 0xFF) shl 8)).toShort().toInt()) / 100f
+        } else 0f
+        val humPct = if (v.size >= 24) {
+            ((v[22].toInt() and 0xFF) or ((v[23].toInt() and 0xFF) shl 8)) / 100f
+        } else 0f
 
         _ui.update {
             it.copy(
@@ -607,6 +616,7 @@ class BirdyVm(app: Application) : AndroidViewModel(app) {
                 vol = vol, night = (flags and 1) != 0, clockOk = (flags and 2) != 0,
                 nightNow = (flags and 4) != 0, nightFrom = nfrom, nightTo = nto,
                 fwVer = fwVer, supportsNight = supports,
+                tempC = tempC, humPct = humPct,
                 servo = if (deadState) dead else alive
             )
         }

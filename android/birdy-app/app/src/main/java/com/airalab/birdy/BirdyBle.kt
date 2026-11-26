@@ -223,6 +223,8 @@ class BirdyBle(private val ctx: Context) {
                 g.discoverServices()
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                 gatt = null
+                queue.clear()
+                opBusy = false
                 onDisconnected?.invoke()
             }
         }
@@ -275,6 +277,7 @@ class BirdyBle(private val ctx: Context) {
             status: Int
         ) {
             if (status == BluetoothGatt.GATT_SUCCESS) handleValue(ch, value)
+            opDone()   /* без этого очередь GATT вставала на 3 с после каждого чтения */
         }
 
         @Deprecated("API < 33")
@@ -288,6 +291,7 @@ class BirdyBle(private val ctx: Context) {
                 val v = ch.value
                 if (v != null) handleValue(ch, v)
             }
+            opDone()
         }
 
         override fun onReadRemoteRssi(g: BluetoothGatt, rssi: Int, status: Int) {

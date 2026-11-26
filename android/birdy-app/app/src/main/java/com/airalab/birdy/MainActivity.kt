@@ -273,6 +273,18 @@ fun ControlScreen(ui: Ui, vm: BirdyVm) {
                     Spacer(Modifier.width(6.dp))
                     Text("ppm", color = Color(0xFF98A2B3), fontSize = 14.sp, modifier = Modifier.padding(bottom = 8.dp))
                 }
+                Spacer(Modifier.height(6.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(
+                        if (ui.tempC != 0f) "%.1f °C".format(ui.tempC) else "— °C",
+                        color = Color(0xFFB8C2D0), fontSize = 15.sp, fontWeight = FontWeight.Medium
+                    )
+                    Text("·", color = Color(0xFF3A4250), fontSize = 15.sp)
+                    Text(
+                        if (ui.humPct != 0f) "%.0f %%".format(ui.humPct) else "— %",
+                        color = Color(0xFFB8C2D0), fontSize = 15.sp, fontWeight = FontWeight.Medium
+                    )
+                }
                 Spacer(Modifier.height(10.dp))
                 Co2Bar(co2 = ui.co2, thr = ui.thr, color = Color(ui.co2Color))
                 Spacer(Modifier.height(6.dp))

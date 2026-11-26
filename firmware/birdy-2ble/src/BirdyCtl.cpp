@@ -35,6 +35,8 @@ static BirdyRuntime _run;
 static BirdyHooks   _hooks;
 static uint16_t _lastCo2 = 400;
 static uint16_t _lastMv = 0; /* последнее напряжение АКБ, мВ */
+static int16_t  _lastTemp = 0; /* последняя температура, 0.01 °C */
+static uint16_t _lastHum = 0;  /* последняя влажность, 0.01 % */
 static bool     _sensorOk = false;
 static bool     _dead = false;
 static volatile bool _forceMeasure = false;
@@ -216,7 +218,7 @@ static void notifyStatus(uint8_t code) {
 }
 
 static void updateInfo(void) {
-  uint8_t b[20];
+  uint8_t b[24];
   b[0]  = BIRDY_CFG_VER;
   b[1]  = (uint8_t)(_run.co2Bad & 0xFF);
   b[2]  = (uint8_t)(_run.co2Bad >> 8);
@@ -237,6 +239,10 @@ static void updateInfo(void) {
   b[17] = (uint8_t)((_run.nightEnabled ? 1 : 0) | (_clockSet ? 2 : 0) | (birdyCtlIsNight() ? 4 : 0));
   b[18] = _run.nightFrom;
   b[19] = _run.nightTo;
+  b[20] = (uint8_t)(_lastTemp & 0xFF);
+  b[21] = (uint8_t)((_lastTemp >> 8) & 0xFF);
+  b[22] = (uint8_t)(_lastHum & 0xFF);
+  b[23] = (uint8_t)(_lastHum >> 8);
   infoChr.write(b, sizeof(b));
 }
 
@@ -606,11 +612,16 @@ void birdyCtlBegin(const BirdyHooks &hooks) {
                 _run.co2Bad);
 }
 
-void birdyCtlReport(uint16_t co2ppm, bool sensorOk, bool dead, uint16_t vbatMv) {
+void birdyCtlReport(uint16_t co2ppm, bool sensorOk, bool dead, uint16_t vbatMv,
+                    float tempC, float humPct) {
   _lastCo2 = co2ppm;
   _sensorOk = sensorOk;
   _dead = dead;
   if (vbatMv) _lastMv = vbatMv;
+  if (sensorOk) {
+    _lastTemp = (int16_t)(tempC * 100.0f);
+    _lastHum = (uint16_t)(humPct * 100.0f);
+  }
   updateInfo();
 }
 
