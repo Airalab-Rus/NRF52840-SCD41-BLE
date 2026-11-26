@@ -579,30 +579,36 @@ void birdyCtlBegin(const BirdyHooks &hooks) {
 
   cmdChr.setProperties(CHR_PROPS_WRITE);
   cmdChr.setPermission(SECMODE_OPEN, SECMODE_OPEN);
+  cmdChr.setMaxLen(64);   /* по умолчанию 20 — команды/трейс обрезались */
   cmdChr.setWriteCallback(onCmdWrite);
   cmdChr.begin();
 
   statChr.setProperties(CHR_PROPS_NOTIFY);
   statChr.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
+  statChr.setMaxLen(32);
   statChr.begin();
 
   infoChr.setProperties(CHR_PROPS_READ);
   infoChr.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
+  infoChr.setMaxLen(24);   /* 24 байта: конфиг + АКБ + toff + громкость/ночь + T/RH */
   infoChr.begin();
 
   /* Текстовые команды/ответы — удобно с телефона (пишем как текст, не hex). */
   txtCmdChr.setProperties(CHR_PROPS_WRITE);
   txtCmdChr.setPermission(SECMODE_OPEN, SECMODE_OPEN);
+  txtCmdChr.setMaxLen(64);
   txtCmdChr.setWriteCallback(onTxtWrite);
   txtCmdChr.begin();
 
   txtStatChr.setProperties(CHR_PROPS_NOTIFY);
   txtStatChr.setPermission(SECMODE_OPEN, SECMODE_NO_ACCESS);
+  txtStatChr.setMaxLen(200);  /* текстовый статус ~120 символов */
   txtStatChr.begin();
 
   /* Журнал измерений: write (команды) + notify (данные). */
   logChr.setProperties(CHR_PROPS_WRITE | CHR_PROPS_NOTIFY);
   logChr.setPermission(SECMODE_OPEN, SECMODE_OPEN);
+  logChr.setMaxLen(244);      /* пакет журнала до 20 записей */
   logChr.setWriteCallback(onLogWrite);
   logChr.begin();
 
